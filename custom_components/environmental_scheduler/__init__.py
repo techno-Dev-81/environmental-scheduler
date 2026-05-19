@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DEFAULT_ROOMS, DOMAIN, HOUSE_PROFILES
 from .models import Profile, Room
+from .services import register_services, unregister_services
 from .storage import SchedulerStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,6 +29,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = store
+
+    register_services(hass)
     return True
 
 
@@ -35,6 +38,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     store: SchedulerStore = hass.data[DOMAIN].pop(entry.entry_id, None)
     if store:
         await store.async_save()
+    unregister_services(hass)
     return True
 
 

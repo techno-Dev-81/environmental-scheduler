@@ -1,0 +1,76 @@
+get_active_block:
+  name: Get Active Block
+  description: Returns the currently active temperature block for a room, or the fallback temperature if no block is active.
+  fields:
+    room:
+      name: Room
+      description: Room ID (e.g. living_room)
+      required: true
+      example: living_room
+      selector:
+        text:
+
+get_blocks:
+  name: Get Blocks
+  description: Returns all blocks for a room, optionally filtered by profile and/or day.
+  fields:
+    room:
+      name: Room
+      description: Room ID (e.g. living_room)
+      required: true
+      example: living_room
+      selector:
+        text:
+    profile:
+      name: Profile
+      description: Filter by profile name (e.g. home, away, night)
+      required: false
+      example: home
+      selector:
+        text:
+    day:
+      name: Day
+      description: Filter by day of week
+      required: false
+      example: monday
+      selector:
+        select:
+          options:
+            - monday
+            - tuesday
+            - wednesday
+            - thursday
+            - friday
+            - saturday
+            - sunday
+
+set_profile:
+  name: Set Profile
+  description: Sets the active profile for a room. Fires a profile_changed event.
+  fields:
+    room:
+      name: Room
+      description: Room ID (e.g. living_room)
+      required: true
+      example: living_room
+      selector:
+        text:
+    profile:
+      name: Profile
+      description: Profile name to activate (e.g. home, away, night, always_on, always_off)
+      required: true
+      example: away
+      selector:
+        text:
+
+set_vacation_mode:
+  name: Set Vacation Mode
+  description: Enables or disables vacation mode. When enabled, all rooms use the vacation fallback temperature regardless of schedule.
+  fields:
+    enabled:
+      name: Enabled
+      description: true to enable vacation mode, false to disable
+      required: true
+      example: true
+      selector:
+        boolean:
