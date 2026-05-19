@@ -30,6 +30,7 @@ SERVICE_SET_VACATION_MODE = "set_vacation_mode"
 SERVICE_COMMIT_BLOCK     = "commit_block"
 SERVICE_DELETE_BLOCK     = "delete_block"
 SERVICE_TOGGLE_BLOCK     = "toggle_block"
+SERVICE_COPY_DAY         = "copy_day"
 
 SCHEMA_GET_ACTIVE_BLOCK = vol.Schema({
     vol.Required(ATTR_ROOM): cv.string,
@@ -74,6 +75,12 @@ SCHEMA_TOGGLE_BLOCK = vol.Schema({
     vol.Required(ATTR_DAY):      vol.In(DAYS_OF_WEEK),
     vol.Required(ATTR_BLOCK_ID): cv.string,
     vol.Required(ATTR_ENABLED):  cv.boolean,
+})
+
+SCHEMA_COPY_DAY = vol.Schema({
+    vol.Required(ATTR_ROOM):        cv.string,
+    vol.Required("source_day"):     vol.In(DAYS_OF_WEEK),
+    vol.Required("target_days"):    [vol.In(DAYS_OF_WEEK)],
 })
 
 
@@ -340,6 +347,40 @@ def register_services(hass: HomeAssistant) -> None:
         supports_response=SupportsResponse.ONLY,
     )
 
+    async def handle_copy_day(call: ServiceCall) -> ServiceResponse:
+        from .models import Block
+        store      = _get_store(hass)
+        room_id    = call.data[ATTR_ROOM]
+        source_day = call.data["source_day"]
+        target_days = call.data["target_days"]
+
+        room = store.get_room(room_id)
+        if not room:
+            raise ServiceValidationError(f"Room '{room_id}' not found")
+
+        source_blocks = room.get_day(source_day)
+        copied = 0
+        for day in target_days:
+            if day == source_day:
+                continue
+            new_blocks = [Block.new(b.start_time, b.end_time, b.temperature, b.enabled) for b in source_blocks]
+            room.weekly_schedule[day] = new_blocks
+            copied += 1
+            hass.bus.async_fire(f"{DOMAIN}.block_changed", {
+                "room": room_id, "day": day,
+                "action": "day_copied", "source_day": source_day,
+            })
+
+        await store.async_save()
+        return {"status": "ok", "source_day": source_day, "copied_to": [d for d in target_days if d != source_day], "block_count": len(source_blocks)}
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_COPY_DAY,
+        handle_copy_day,
+        schema=SCHEMA_COPY_DAY,
+        supports_response=SupportsResponse.ONLY,
+    )
+
 
 def unregister_services(hass: HomeAssistant) -> None:
     for service in (
@@ -352,5 +393,6 @@ def unregister_services(hass: HomeAssistant) -> None:
         f"{SERVICE_COMMIT_BLOCK}_force",
         SERVICE_DELETE_BLOCK,
         SERVICE_TOGGLE_BLOCK,
+        SERVICE_COPY_DAY,
     ):
         hass.services.async_remove(DOMAIN, service)
