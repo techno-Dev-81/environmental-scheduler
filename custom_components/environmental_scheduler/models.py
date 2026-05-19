@@ -98,9 +98,10 @@ class Block:
 class Room:
     id: str
     name: str
+    area_id: str | None = None
     climate_entities: list[str] = field(default_factory=list)
     hot_water_entity: str | None = None
-    temperature_sensor: str | None = None
+    temperature_sensors: list[str] = field(default_factory=list)
     preheat_offset_minutes: int = 0
     weekly_schedule: dict[str, list[Block]] = field(
         default_factory=lambda: {day: [] for day in DAYS_OF_WEEK}
@@ -133,9 +134,10 @@ class Room:
         return {
             "id": self.id,
             "name": self.name,
+            "area_id": self.area_id,
             "climate_entities": self.climate_entities,
             "hot_water_entity": self.hot_water_entity,
-            "temperature_sensor": self.temperature_sensor,
+            "temperature_sensors": self.temperature_sensors,
             "preheat_offset_minutes": self.preheat_offset_minutes,
             "weekly_schedule": {
                 day: [b.to_dict() for b in blocks]
@@ -153,12 +155,16 @@ class Room:
         # Migrate legacy single climate_entity field
         legacy_entity = data.get("climate_entity")
         climate_entities = data.get("climate_entities") or ([legacy_entity] if legacy_entity else [])
+        # Migrate legacy single temperature_sensor field
+        legacy_sensor = data.get("temperature_sensor")
+        temperature_sensors = data.get("temperature_sensors") or ([legacy_sensor] if legacy_sensor else [])
         return Room(
             id=data["id"],
             name=data["name"],
+            area_id=data.get("area_id"),
             climate_entities=climate_entities,
             hot_water_entity=data.get("hot_water_entity"),
-            temperature_sensor=data.get("temperature_sensor"),
+            temperature_sensors=temperature_sensors,
             preheat_offset_minutes=int(data.get("preheat_offset_minutes", 0)),
             weekly_schedule={
                 day: [Block.from_dict(b) for b in blocks]
