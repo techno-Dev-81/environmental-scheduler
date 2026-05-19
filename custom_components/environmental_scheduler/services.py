@@ -18,6 +18,7 @@ ATTR_DAY = "day"
 ATTR_MODE = "mode"
 ATTR_ENABLED = "enabled"
 
+SERVICE_GET_ROOMS = "get_rooms"
 SERVICE_GET_ACTIVE_BLOCK = "get_active_block"
 SERVICE_GET_BLOCKS = "get_blocks"
 SERVICE_SET_HOUSE_MODE = "set_house_mode"
@@ -52,6 +53,16 @@ def _get_store(hass: HomeAssistant) -> SchedulerStore:
 
 
 def register_services(hass: HomeAssistant) -> None:
+
+    async def handle_get_rooms(call: ServiceCall) -> ServiceResponse:
+        store = _get_store(hass)
+        rooms = store.get_rooms()
+        return {
+            "rooms": [
+                {"id": r.id, "name": r.name, "persons": r.persons}
+                for r in rooms
+            ]
+        }
 
     async def handle_get_active_block(call: ServiceCall) -> ServiceResponse:
         store = _get_store(hass)
@@ -127,6 +138,12 @@ def register_services(hass: HomeAssistant) -> None:
         }
 
     hass.services.async_register(
+        DOMAIN, SERVICE_GET_ROOMS,
+        handle_get_rooms,
+        schema=vol.Schema({}),
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
         DOMAIN, SERVICE_GET_ACTIVE_BLOCK,
         handle_get_active_block,
         schema=SCHEMA_GET_ACTIVE_BLOCK,
@@ -154,6 +171,7 @@ def register_services(hass: HomeAssistant) -> None:
 
 def unregister_services(hass: HomeAssistant) -> None:
     for service in (
+        SERVICE_GET_ROOMS,
         SERVICE_GET_ACTIVE_BLOCK,
         SERVICE_GET_BLOCKS,
         SERVICE_SET_HOUSE_MODE,

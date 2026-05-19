@@ -1,3 +1,7 @@
+get_rooms:
+  name: Get Rooms
+  description: Returns all configured rooms with their IDs, names, and assigned persons.
+
 get_active_block:
   name: Get Active Block
   description: >
