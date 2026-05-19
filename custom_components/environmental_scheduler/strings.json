@@ -65,12 +65,6 @@
           "climate_entities": "TRV / climate entities (one or more)",
           "hot_water_entity": "Hot water entity (switch or water_heater)",
           "temperature_sensors": "Temperature sensors (optional, one or more)",
-          "door_entities": "Door sensors",
-          "door_action": "Door open action",
-          "door_drop_degrees": "Drop heating by (degrees) when door open",
-          "window_entities": "Window sensors",
-          "window_action": "Window open action",
-          "window_drop_degrees": "Drop heating by (degrees) when window open",
           "persons": "Persons who activate this room (heats if any person is home)",
           "delete": "Delete this room"
         }
