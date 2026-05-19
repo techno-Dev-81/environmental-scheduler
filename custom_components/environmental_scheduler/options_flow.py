@@ -226,7 +226,6 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
             room.hot_water_entity   = user_input.get("hot_water_entity") or None
             room.temperature_sensor = user_input.get("temperature_sensor") or None
             room.persons            = user_input.get("persons") or []
-            room.persons_logic          = user_input.get("persons_logic", "and")
             store.update_room(room)
             await store.async_save()
             return await self.async_step_init()
@@ -247,15 +246,6 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
             schema_dict[vol.Optional("persons", default=room.persons)] = selector.selector({
                 "select": {"options": person_options, "multiple": True, "mode": "list"},
             })
-            schema_dict[vol.Optional("persons_logic", default=room.persons_logic)] = selector.selector({
-                "select": {
-                    "options": [
-                        {"value": "and", "label": "All away → reduce heat (AND)"},
-                        {"value": "or",  "label": "Any away → reduce heat (OR)"},
-                    ],
-                }
-            })
-
         schema_dict[vol.Optional("delete", default=False)] = _BOOL_SELECTOR
 
         return self.async_show_form(
