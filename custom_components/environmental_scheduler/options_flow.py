@@ -18,7 +18,14 @@ _TEMP_SELECTOR = selector.selector({
 _PERSON_ENTITY_SELECTOR = selector.selector({
     "entity": {"domain": "person"},
 })
+_CLIMATE_ENTITY_SELECTOR = selector.selector({
+    "entity": {"domain": ["climate", "water_heater"]},
+})
+_SWITCH_ENTITY_SELECTOR = selector.selector({
+    "entity": {"domain": ["switch", "water_heater"]},
+})
 _TEXT_SELECTOR = selector.selector({"text": {}})
+_BOOL_SELECTOR = selector.selector({"boolean": {}})
 
 
 def _get_store(hass, entry_id: str) -> SchedulerStore:
@@ -52,6 +59,7 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
         errors = {}
 
         if user_input is not None:
+            config.node_red_mode = user_input["node_red_mode"]
             config.vacation_temp = user_input["vacation_temp"]
             config.global_away_temp = user_input["global_away_temp"]
             config.global_fallback_temp = user_input["global_fallback_temp"]
@@ -60,6 +68,7 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data={})
 
         schema = vol.Schema({
+            vol.Required("node_red_mode", default=config.node_red_mode): _BOOL_SELECTOR,
             vol.Required("vacation_temp", default=config.vacation_temp): _TEMP_SELECTOR,
             vol.Required("global_away_temp", default=config.global_away_temp): _TEMP_SELECTOR,
             vol.Required("global_fallback_temp", default=config.global_fallback_temp): _TEMP_SELECTOR,
@@ -199,6 +208,10 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
         errors = {}
 
         if user_input is not None:
+            room.entity_type = user_input["entity_type"]
+            room.climate_entity = user_input.get("climate_entity") or None
+            room.hot_water_entity = user_input.get("hot_water_entity") or None
+            room.preheat_offset_minutes = int(user_input.get("preheat_offset_minutes") or 0)
             room.away_temp = user_input.get("away_temp") or None
             room.fallback_temp = user_input.get("fallback_temp") or None
             room.persons = user_input.get("persons") or []
@@ -210,6 +223,19 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
         fallback_default = room.fallback_temp if room.fallback_temp is not None else config.global_fallback_temp
 
         schema_dict = {
+            vol.Required("entity_type", default=room.entity_type): selector.selector({
+                "select": {
+                    "options": [
+                        {"value": "heating", "label": "Heating (TRV / climate)"},
+                        {"value": "hot_water", "label": "Hot water"},
+                    ],
+                }
+            }),
+            vol.Optional("climate_entity", default=room.climate_entity or ""): _CLIMATE_ENTITY_SELECTOR,
+            vol.Optional("hot_water_entity", default=room.hot_water_entity or ""): _SWITCH_ENTITY_SELECTOR,
+            vol.Optional("preheat_offset_minutes", default=room.preheat_offset_minutes): selector.selector({
+                "number": {"min": 0, "max": 120, "step": 5, "unit_of_measurement": "min", "mode": "slider"},
+            }),
             vol.Optional("away_temp", default=away_default): _TEMP_SELECTOR,
             vol.Optional("fallback_temp", default=fallback_default): _TEMP_SELECTOR,
         }

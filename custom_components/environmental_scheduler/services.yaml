@@ -75,3 +75,53 @@ set_vacation_mode:
       example: true
       selector:
         boolean:
+
+get_upcoming_blocks:
+  name: Get Upcoming Blocks
+  description: >
+    Returns the next scheduled blocks for a room starting from now, with pre-calculated
+    preheat_start times. Used by Node-RED to schedule pre-heating actions.
+  fields:
+    room:
+      name: Room
+      description: Room ID (e.g. living_room)
+      required: true
+      example: living_room
+      selector:
+        text:
+    limit:
+      name: Limit
+      description: Maximum number of upcoming blocks to return (default 5, max 20)
+      required: false
+      example: 5
+      selector:
+        number:
+          min: 1
+          max: 20
+          mode: box
+
+set_preheat_offset:
+  name: Set Preheat Offset
+  description: >
+    Sets the number of minutes before a block's start time that pre-heating should begin.
+    Typically written back by Node-RED as it learns each room's heat-up time.
+    Can also be set manually.
+  fields:
+    room:
+      name: Room
+      description: Room ID (e.g. living_room)
+      required: true
+      example: living_room
+      selector:
+        text:
+    offset_minutes:
+      name: Offset (minutes)
+      description: Minutes before block start to begin pre-heating (0–120)
+      required: true
+      example: 25
+      selector:
+        number:
+          min: 0
+          max: 120
+          unit_of_measurement: min
+          mode: slider

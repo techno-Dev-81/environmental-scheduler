@@ -97,11 +97,19 @@ class EnvironmentalSchedulerOverviewCard extends HTMLElement {
     await this._doRefresh();
   }
 
-  _navigateToSchedule() {
+  _navigateToSchedule(roomId) {
     const path = this._config.schedule_view;
-    if (!path) return;
+    if (!path) {
+      console.warn('[EnvScheduler Overview] schedule_view not configured — set it in the card editor');
+      return;
+    }
+    // Store selected room so the schedule card can pre-select it on load
+    if (roomId) sessionStorage.setItem('envscheduler_selected_room', roomId);
     history.pushState(null, '', path);
-    window.dispatchEvent(new CustomEvent('location-changed', { detail: { replace: false } }));
+    // Must fire on the element with bubbles+composed so HA's router catches it
+    this.dispatchEvent(new CustomEvent('location-changed', {
+      bubbles: true, composed: true, detail: { replace: false },
+    }));
   }
 
   // ------------------------------------------------------------------ render

@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DEFAULT_ROOMS, DOMAIN
 from .models import Block, Room
+from .scheduler import EnvironmentalScheduler
 from .services import register_services, unregister_services
 from .storage import SchedulerStore
 
@@ -38,11 +39,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = store
 
+    scheduler = EnvironmentalScheduler(hass, store)
+    scheduler.start()
+    hass.data[DOMAIN][f"{entry.entry_id}_scheduler"] = scheduler
+
     register_services(hass)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    scheduler: EnvironmentalScheduler = hass.data[DOMAIN].pop(f"{entry.entry_id}_scheduler", None)
+    if scheduler:
+        scheduler.stop()
+
     store: SchedulerStore = hass.data[DOMAIN].pop(entry.entry_id, None)
     if store:
         await store.async_save()

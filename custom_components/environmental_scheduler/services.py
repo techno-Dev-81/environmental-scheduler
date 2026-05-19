@@ -22,16 +22,18 @@ ATTR_START_TIME = "start_time"
 ATTR_END_TIME   = "end_time"
 ATTR_TEMPERATURE = "temperature"
 
-SERVICE_GET_ROOMS        = "get_rooms"
-SERVICE_GET_ACTIVE_BLOCK = "get_active_block"
-SERVICE_GET_BLOCKS       = "get_blocks"
-SERVICE_SET_HOUSE_MODE   = "set_house_mode"
-SERVICE_SET_VACATION_MODE = "set_vacation_mode"
-SERVICE_COMMIT_BLOCK     = "commit_block"
-SERVICE_DELETE_BLOCK     = "delete_block"
-SERVICE_TOGGLE_BLOCK     = "toggle_block"
-SERVICE_COPY_DAY         = "copy_day"
-SERVICE_GET_HOUSE_STATUS = "get_house_status"
+SERVICE_GET_ROOMS            = "get_rooms"
+SERVICE_GET_ACTIVE_BLOCK     = "get_active_block"
+SERVICE_GET_BLOCKS           = "get_blocks"
+SERVICE_GET_UPCOMING_BLOCKS  = "get_upcoming_blocks"
+SERVICE_SET_HOUSE_MODE       = "set_house_mode"
+SERVICE_SET_VACATION_MODE    = "set_vacation_mode"
+SERVICE_COMMIT_BLOCK         = "commit_block"
+SERVICE_DELETE_BLOCK         = "delete_block"
+SERVICE_TOGGLE_BLOCK         = "toggle_block"
+SERVICE_COPY_DAY             = "copy_day"
+SERVICE_GET_HOUSE_STATUS     = "get_house_status"
+SERVICE_SET_PREHEAT_OFFSET   = "set_preheat_offset"
 
 SCHEMA_GET_ACTIVE_BLOCK = vol.Schema({
     vol.Required(ATTR_ROOM): cv.string,
@@ -82,6 +84,16 @@ SCHEMA_COPY_DAY = vol.Schema({
     vol.Required(ATTR_ROOM):        cv.string,
     vol.Required("source_day"):     vol.In(DAYS_OF_WEEK),
     vol.Required("target_days"):    [vol.In(DAYS_OF_WEEK)],
+})
+
+SCHEMA_GET_UPCOMING_BLOCKS = vol.Schema({
+    vol.Required(ATTR_ROOM): cv.string,
+    vol.Optional("limit", default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=20)),
+})
+
+SCHEMA_SET_PREHEAT_OFFSET = vol.Schema({
+    vol.Required(ATTR_ROOM): cv.string,
+    vol.Required("offset_minutes"): vol.All(vol.Coerce(int), vol.Range(min=0, max=120)),
 })
 
 
@@ -428,12 +440,56 @@ def register_services(hass: HomeAssistant) -> None:
         supports_response=SupportsResponse.ONLY,
     )
 
+    async def handle_get_upcoming_blocks(call: ServiceCall) -> ServiceResponse:
+        store = _get_store(hass)
+        room_id = call.data[ATTR_ROOM]
+        limit = call.data.get("limit", 5)
+        if store.get_room(room_id) is None:
+            raise ServiceValidationError(f"Room '{room_id}' not found")
+        room = store.get_room(room_id)
+        try:
+            upcoming = store.get_upcoming_blocks(room_id, datetime.now(), limit)
+        except ValueError as e:
+            raise ServiceValidationError(str(e)) from e
+        return {
+            "room": room_id,
+            "entity_type": room.entity_type,
+            "preheat_offset_minutes": room.preheat_offset_minutes,
+            "upcoming": upcoming,
+        }
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_GET_UPCOMING_BLOCKS,
+        handle_get_upcoming_blocks,
+        schema=SCHEMA_GET_UPCOMING_BLOCKS,
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    async def handle_set_preheat_offset(call: ServiceCall) -> ServiceResponse:
+        store = _get_store(hass)
+        room_id = call.data[ATTR_ROOM]
+        offset = call.data["offset_minutes"]
+        try:
+            store.set_preheat_offset(room_id, offset)
+        except ValueError as e:
+            raise ServiceValidationError(str(e)) from e
+        await store.async_save()
+        return {"status": "ok", "room": room_id, "offset_minutes": offset}
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_SET_PREHEAT_OFFSET,
+        handle_set_preheat_offset,
+        schema=SCHEMA_SET_PREHEAT_OFFSET,
+        supports_response=SupportsResponse.ONLY,
+    )
+
 
 def unregister_services(hass: HomeAssistant) -> None:
     for service in (
         SERVICE_GET_ROOMS,
         SERVICE_GET_ACTIVE_BLOCK,
         SERVICE_GET_BLOCKS,
+        SERVICE_GET_UPCOMING_BLOCKS,
         SERVICE_SET_HOUSE_MODE,
         SERVICE_SET_VACATION_MODE,
         SERVICE_COMMIT_BLOCK,
@@ -442,5 +498,6 @@ def unregister_services(hass: HomeAssistant) -> None:
         SERVICE_TOGGLE_BLOCK,
         SERVICE_COPY_DAY,
         SERVICE_GET_HOUSE_STATUS,
+        SERVICE_SET_PREHEAT_OFFSET,
     ):
         hass.services.async_remove(DOMAIN, service)

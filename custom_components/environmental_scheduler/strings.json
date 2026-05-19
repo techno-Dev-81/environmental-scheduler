@@ -21,8 +21,9 @@
         }
       },
       "global_settings": {
-        "title": "Global Temperature Settings",
+        "title": "Global Settings",
         "data": {
+          "node_red_mode": "Node-RED mode (disable HA direct entity control)",
           "vacation_temp": "Vacation temperature (frost protection)",
           "global_away_temp": "Global away temperature",
           "global_fallback_temp": "Global fallback temperature (no active block)"
@@ -58,6 +59,10 @@
       "edit_room": {
         "title": "Edit Room — {room_name}",
         "data": {
+          "entity_type": "Zone type",
+          "climate_entity": "Climate / TRV entity (heating zones)",
+          "hot_water_entity": "Hot water entity (switch or water_heater)",
+          "preheat_offset_minutes": "Pre-heat offset (minutes before block start)",
           "away_temp": "Away temperature (overrides global)",
           "fallback_temp": "Fallback temperature (overrides global)",
           "persons": "Persons who activate this room"
