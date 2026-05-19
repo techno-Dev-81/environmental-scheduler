@@ -106,7 +106,6 @@ class Room:
         default_factory=lambda: {day: [] for day in DAYS_OF_WEEK}
     )
     persons: list[str] = field(default_factory=list)
-    persons_logic: str = "and"  # "and" = all away → cold; "or" = any away → cold
     occupancy_entity: str | None = None
     door_window_actions: dict = field(default_factory=dict)
     away_temp: float | None = None
@@ -143,7 +142,6 @@ class Room:
                 for day, blocks in self.weekly_schedule.items()
             },
             "persons": self.persons,
-            "persons_logic": self.persons_logic,
             "occupancy_entity": self.occupancy_entity,
             "door_window_actions": self.door_window_actions,
             "away_temp": self.away_temp,
@@ -167,7 +165,6 @@ class Room:
                 for day, blocks in data.get("weekly_schedule", {}).items()
             },
             persons=data.get("persons", []),
-            persons_logic=data.get("persons_logic", "and"),
             occupancy_entity=data.get("occupancy_entity"),
             door_window_actions=data.get("door_window_actions", {}),
             away_temp=data.get("away_temp"),
