@@ -16,8 +16,9 @@ _TEMP_SELECTOR = selector.selector({
     "number": {"min": TEMP_MIN, "max": TEMP_MAX, "step": 0.5, "unit_of_measurement": "°C", "mode": "box"},
 })
 _PERSON_ENTITY_SELECTOR = selector.selector({"entity": {"domain": "person"}})
-_CLIMATE_ENTITY_SELECTOR = selector.selector({"entity": {"domain": ["climate", "water_heater"]}})
-_SWITCH_ENTITY_SELECTOR  = selector.selector({"entity": {"domain": ["switch", "water_heater"]}})
+_CLIMATE_ENTITIES_SELECTOR = selector.selector({"entity": {"domain": "climate", "multiple": True}})
+_SWITCH_ENTITY_SELECTOR    = selector.selector({"entity": {"domain": ["switch", "water_heater"]}})
+_TEMP_SENSOR_SELECTOR      = selector.selector({"entity": {"domain": "sensor", "device_class": "temperature"}})
 _TEXT_SELECTOR  = selector.selector({"text": {}})
 _BOOL_SELECTOR  = selector.selector({"boolean": {}})
 
@@ -221,9 +222,9 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
                 await store.async_save()
                 return await self.async_step_init()
 
-            room.entity_type            = user_input["entity_type"]
-            room.climate_entity         = user_input.get("climate_entity") or None
+            room.climate_entities       = user_input.get("climate_entities") or []
             room.hot_water_entity       = user_input.get("hot_water_entity") or None
+            room.temperature_sensor     = user_input.get("temperature_sensor") or None
             room.preheat_offset_minutes = int(user_input.get("preheat_offset_minutes") or 0)
             room.persons                = user_input.get("persons") or []
             room.persons_logic          = user_input.get("persons_logic", "and")
@@ -232,16 +233,9 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
             return await self.async_step_init()
 
         schema_dict = {
-            vol.Required("entity_type", default=room.entity_type): selector.selector({
-                "select": {
-                    "options": [
-                        {"value": "heating",   "label": "Heating (TRV / climate entity)"},
-                        {"value": "hot_water", "label": "Hot water (switch or water_heater)"},
-                    ],
-                }
-            }),
-            vol.Optional("climate_entity",   default=room.climate_entity   or ""): _CLIMATE_ENTITY_SELECTOR,
+            vol.Optional("climate_entities", default=room.climate_entities): _CLIMATE_ENTITIES_SELECTOR,
             vol.Optional("hot_water_entity", default=room.hot_water_entity or ""): _SWITCH_ENTITY_SELECTOR,
+            vol.Optional("temperature_sensor", default=room.temperature_sensor or ""): _TEMP_SENSOR_SELECTOR,
             vol.Optional("preheat_offset_minutes", default=room.preheat_offset_minutes): selector.selector({
                 "number": {"min": 0, "max": 120, "step": 5, "unit_of_measurement": "min", "mode": "slider"},
             }),
@@ -288,9 +282,8 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
                 while room_id in existing:
                     room_id = f"{base}_{n}"
                     n += 1
-                entity_type = user_input["entity_type"]
                 try:
-                    store.add_room(Room(id=room_id, name=name, entity_type=entity_type))
+                    store.add_room(Room(id=room_id, name=name))
                     await store.async_save()
                     return await self.async_step_init()
                 except ValueError as e:
@@ -298,16 +291,6 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_form(
             step_id="add_room",
-            data_schema=vol.Schema({
-                vol.Required("name"): _TEXT_SELECTOR,
-                vol.Required("entity_type", default="heating"): selector.selector({
-                    "select": {
-                        "options": [
-                            {"value": "heating",   "label": "Heating (TRV / climate entity)"},
-                            {"value": "hot_water", "label": "Hot water (switch or water_heater)"},
-                        ],
-                    }
-                }),
-            }),
+            data_schema=vol.Schema({vol.Required("name"): _TEXT_SELECTOR}),
             errors=errors,
         )

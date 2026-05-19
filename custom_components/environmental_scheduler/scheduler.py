@@ -104,36 +104,34 @@ class EnvironmentalScheduler:
             await self._apply_current_state(room, now, config)
 
     async def _apply_current_state(self, room, now: datetime, config) -> None:
-        """Set the entity to the currently correct temperature/state."""
-        entity = room.controllable_entity()
-        if not entity:
+        """Set entities to the currently correct temperature/state."""
+        entities = room.controllable_entities()
+        if not entities:
             return
-
         result = self._store.get_active_block(room.id, now)
         target_temp = result["target_temperature"]
         reason = result["reason"]
-
         if room.entity_type == "hot_water":
-            await self._control_hot_water(entity, reason)
+            await self._control_hot_water(entities[0], reason)
         else:
-            await self._control_climate(entity, target_temp)
+            for entity_id in entities:
+                await self._control_climate(entity_id, target_temp)
 
     async def _apply_block(self, room, block, config) -> None:
-        """Apply a specific block's setpoint immediately."""
-        entity = room.controllable_entity()
-        if not entity:
+        """Apply a specific block's setpoint immediately (at preheat time)."""
+        entities = room.controllable_entities()
+        if not entities:
             return
-
         if room.entity_type == "hot_water":
-            await self._control_hot_water(entity, "schedule")
+            await self._control_hot_water(entities[0], "schedule")
         else:
-            await self._control_climate(entity, block.temperature)
+            for entity_id in entities:
+                await self._control_climate(entity_id, block.temperature)
 
     async def _control_climate(self, entity_id: str, temperature: float) -> None:
         try:
             await self._hass.services.async_call(
-                _CLIMATE_DOMAIN,
-                "set_temperature",
+                _CLIMATE_DOMAIN, "set_temperature",
                 {"entity_id": entity_id, "temperature": temperature},
                 blocking=False,
             )
@@ -142,15 +140,12 @@ class EnvironmentalScheduler:
             _LOGGER.exception("[EnvScheduler] Failed to set temperature on %s", entity_id)
 
     async def _control_hot_water(self, entity_id: str, reason: str) -> None:
-        """Turn hot water on for active/preheat, off for away/vacation/fallback."""
-        active = reason in ("schedule",)
+        active = reason == "schedule"
         domain = _WATER_HEATER_DOMAIN if entity_id.startswith("water_heater.") else _SWITCH_DOMAIN
         service = "turn_on" if active else "turn_off"
         try:
             await self._hass.services.async_call(
-                domain, service,
-                {"entity_id": entity_id},
-                blocking=False,
+                domain, service, {"entity_id": entity_id}, blocking=False,
             )
             _LOGGER.debug("[EnvScheduler] %s.%s → %s", domain, service, entity_id)
         except Exception:
