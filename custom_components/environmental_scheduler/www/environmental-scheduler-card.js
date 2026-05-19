@@ -3,9 +3,9 @@
 // Click an existing block to edit or delete it.
 // Auto-refreshes every 30 seconds.
 //
-// Config options (all optional):
+// Config options (set via visual editor or YAML):
 //   title: "My Scheduler"   — card heading  (default: "Environmental Scheduler")
-//   view:  "week" | "day"   — default view  (default: "week")
+//   view:  "week" | "day"   — view mode     (default: "week")
 
 const ALL_DAYS   = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
 const DAY_LABELS = { monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu', friday:'Fri', saturday:'Sat', sunday:'Sun' };
@@ -314,7 +314,6 @@ class EnvironmentalSchedulerCard extends HTMLElement {
         <div class="header">
           <span class="title">${title}</span>
           <span class="mode-badge">${meta.label}</span>
-          <button class="view-toggle">${this._view==='week'?'Day':'Week'}</button>
           <select>${roomOpts||'<option>Loading…</option>'}</select>
         </div>
         <div class="status-bar"><span class="s-label">Now:</span>${statusHtml}</div>
@@ -383,9 +382,6 @@ class EnvironmentalSchedulerCard extends HTMLElement {
       this._render(); this._doRefresh();
     });
 
-    root.querySelector('.view-toggle')?.addEventListener('click', () => {
-      this._view = this._view==='week'?'day':'week'; this._render();
-    });
 
     // Track clicks — add block
     root.querySelectorAll('.day-track').forEach(track => {
@@ -514,8 +510,68 @@ class EnvironmentalSchedulerCard extends HTMLElement {
   }
 
   getCardSize() { return this._view==='day' ? 3 : 5; }
-  static getStubConfig() { return {}; }
+
+  static getConfigElement() {
+    return document.createElement('environmental-scheduler-card-editor');
+  }
+
+  static getStubConfig() {
+    return { title: 'Environmental Scheduler', view: 'week' };
+  }
 }
+
+// ------------------------------------------------------------------ Visual editor
+
+class EnvironmentalSchedulerCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._config = {};
+  }
+
+  setConfig(config) {
+    this._config = config;
+    this._render();
+  }
+
+  _render() {
+    this.shadowRoot.innerHTML = `
+      <style>
+        .editor { padding: 4px 0; }
+        ha-form { display: block; }
+      </style>
+      <div class="editor">
+        <ha-form
+          .schema=${JSON.stringify([
+            { name: 'title',  selector: { text: {} },   label: 'Card title' },
+            { name: 'view',   selector: { select: { options: [
+              { value: 'week', label: 'Week' },
+              { value: 'day',  label: 'Day'  },
+            ]}}, label: 'Default view' },
+          ])}
+          .data=${JSON.stringify(this._config)}
+        ></ha-form>
+      </div>`;
+
+    const form = this.shadowRoot.querySelector('ha-form');
+    if (form) {
+      form.schema = [
+        { name: 'title', selector: { text: {} },   label: 'Card title' },
+        { name: 'view',  selector: { select: { options: [
+          { value: 'week', label: 'Week' },
+          { value: 'day',  label: 'Day'  },
+        ]}}, label: 'Default view' },
+      ];
+      form.data = this._config;
+      form.addEventListener('value-changed', e => {
+        this._config = { ...this._config, ...e.detail.value };
+        this.dispatchEvent(new CustomEvent('config-changed', { detail: { config: this._config }, bubbles: true, composed: true }));
+      });
+    }
+  }
+}
+
+customElements.define('environmental-scheduler-card-editor', EnvironmentalSchedulerCardEditor);
 
 customElements.define('environmental-scheduler-card', EnvironmentalSchedulerCard);
 window.customCards = window.customCards || [];
