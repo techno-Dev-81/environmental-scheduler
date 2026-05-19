@@ -94,10 +94,17 @@ class Block:
         )
 
 
+ENTITY_TYPES = ["heating", "hot_water"]
+
+
 @dataclass
 class Room:
     id: str
     name: str
+    entity_type: str = "heating"
+    climate_entity: str | None = None
+    hot_water_entity: str | None = None
+    preheat_offset_minutes: int = 0
     weekly_schedule: dict[str, list[Block]] = field(
         default_factory=lambda: {day: [] for day in DAYS_OF_WEEK}
     )
@@ -116,10 +123,20 @@ class Room:
                 return block
         return None
 
+    def controllable_entity(self) -> str | None:
+        """Return whichever entity this room uses for direct control, or None."""
+        if self.entity_type == "hot_water":
+            return self.hot_water_entity
+        return self.climate_entity
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "name": self.name,
+            "entity_type": self.entity_type,
+            "climate_entity": self.climate_entity,
+            "hot_water_entity": self.hot_water_entity,
+            "preheat_offset_minutes": self.preheat_offset_minutes,
             "weekly_schedule": {
                 day: [b.to_dict() for b in blocks]
                 for day, blocks in self.weekly_schedule.items()
@@ -136,6 +153,10 @@ class Room:
         return Room(
             id=data["id"],
             name=data["name"],
+            entity_type=data.get("entity_type", "heating"),
+            climate_entity=data.get("climate_entity"),
+            hot_water_entity=data.get("hot_water_entity"),
+            preheat_offset_minutes=int(data.get("preheat_offset_minutes", 0)),
             weekly_schedule={
                 day: [Block.from_dict(b) for b in blocks]
                 for day, blocks in data.get("weekly_schedule", {}).items()
@@ -173,6 +194,7 @@ class Person:
 @dataclass
 class SystemConfig:
     house_mode: str = "normal"
+    node_red_mode: bool = False
     vacation_temp: float = VACATION_TEMP
     global_away_temp: float = GLOBAL_AWAY_TEMP
     global_fallback_temp: float = GLOBAL_FALLBACK_TEMP
@@ -187,6 +209,7 @@ class SystemConfig:
     def to_dict(self) -> dict:
         return {
             "house_mode": self.house_mode,
+            "node_red_mode": self.node_red_mode,
             "vacation_temp": self.vacation_temp,
             "global_away_temp": self.global_away_temp,
             "global_fallback_temp": self.global_fallback_temp,
@@ -203,6 +226,7 @@ class SystemConfig:
     def from_dict(data: dict) -> "SystemConfig":
         return SystemConfig(
             house_mode=data.get("house_mode", "normal"),
+            node_red_mode=bool(data.get("node_red_mode", False)),
             vacation_temp=float(data.get("vacation_temp", VACATION_TEMP)),
             global_away_temp=float(data.get("global_away_temp", GLOBAL_AWAY_TEMP)),
             global_fallback_temp=float(data.get("global_fallback_temp", GLOBAL_FALLBACK_TEMP)),

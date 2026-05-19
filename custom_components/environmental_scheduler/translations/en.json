@@ -9,5 +9,72 @@
     "abort": {
       "single_instance_allowed": "Only one instance of Environmental Scheduler can be configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Environmental Scheduler",
+        "menu_options": {
+          "global_settings": "Global temperature settings",
+          "manage_persons": "Manage persons",
+          "room_settings": "Room settings"
+        }
+      },
+      "global_settings": {
+        "title": "Global Settings",
+        "data": {
+          "node_red_mode": "Node-RED mode (disable HA direct entity control)",
+          "vacation_temp": "Vacation temperature (frost protection)",
+          "global_away_temp": "Global away temperature",
+          "global_fallback_temp": "Global fallback temperature (no active block)"
+        }
+      },
+      "manage_persons": {
+        "title": "Manage Persons",
+        "data": {
+          "person": "Select a person to edit, or add new"
+        }
+      },
+      "add_person": {
+        "title": "Add Person",
+        "data": {
+          "name": "Display name",
+          "ha_entity": "Home Assistant person entity"
+        }
+      },
+      "edit_person": {
+        "title": "Edit Person",
+        "data": {
+          "name": "Display name",
+          "ha_entity": "Home Assistant person entity",
+          "delete": "Delete this person"
+        }
+      },
+      "room_settings": {
+        "title": "Room Settings",
+        "data": {
+          "room": "Select a room to configure"
+        }
+      },
+      "edit_room": {
+        "title": "Edit Room — {room_name}",
+        "data": {
+          "entity_type": "Zone type",
+          "climate_entity": "Climate / TRV entity (heating zones)",
+          "hot_water_entity": "Hot water entity (switch or water_heater)",
+          "preheat_offset_minutes": "Pre-heat offset (minutes before block start)",
+          "away_temp": "Away temperature (overrides global)",
+          "fallback_temp": "Fallback temperature (overrides global)",
+          "persons": "Persons who activate this room"
+        }
+      }
+    },
+    "abort": {
+      "person_not_found": "Person not found.",
+      "room_not_found": "Room not found."
+    },
+    "error": {
+      "name_required": "Name cannot be empty."
+    }
   }
 }

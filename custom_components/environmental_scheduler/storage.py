@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
@@ -260,6 +260,46 @@ class SchedulerStore:
     # ------------------------------------------------------------------
     # House mode
     # ------------------------------------------------------------------
+
+    def get_upcoming_blocks(self, room_id: str, at: datetime, limit: int = 5) -> list[dict]:
+        """Return the next `limit` enabled blocks starting from `at`, spanning up to 2 days."""
+        room = self._rooms.get(room_id)
+        if not room:
+            raise ValueError(f"Room '{room_id}' not found")
+
+        results: list[dict] = []
+        for day_offset in range(7):
+            check_dt = at + timedelta(days=day_offset)
+            day_name = check_dt.strftime("%A").lower()
+            for block in room.get_day(day_name):
+                if not block.enabled:
+                    continue
+                block_end_dt = check_dt.replace(
+                    hour=block.end().hour, minute=block.end().minute, second=0, microsecond=0
+                )
+                if block_end_dt <= at:
+                    continue
+                offset = room.preheat_offset_minutes
+                block_start_minutes = block.start().hour * 60 + block.start().minute
+                preheat_minutes = max(0, block_start_minutes - offset)
+                preheat_start = f"{preheat_minutes // 60:02d}:{preheat_minutes % 60:02d}"
+                results.append({
+                    "day": day_name,
+                    "date": check_dt.strftime("%Y-%m-%d"),
+                    "block": block.to_dict(),
+                    "preheat_start": preheat_start,
+                })
+                if len(results) >= limit:
+                    return results
+        return results
+
+    def set_preheat_offset(self, room_id: str, offset_minutes: int) -> None:
+        room = self._rooms.get(room_id)
+        if not room:
+            raise ValueError(f"Room '{room_id}' not found")
+        if offset_minutes < 0:
+            raise ValueError("offset_minutes must be >= 0")
+        room.preheat_offset_minutes = offset_minutes
 
     def set_house_mode(self, mode: str) -> None:
         if mode not in HOUSE_MODES:

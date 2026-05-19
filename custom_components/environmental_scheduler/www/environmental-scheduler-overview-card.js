@@ -97,11 +97,19 @@ class EnvironmentalSchedulerOverviewCard extends HTMLElement {
     await this._doRefresh();
   }
 
-  _navigateToSchedule() {
+  _navigateToSchedule(roomId) {
     const path = this._config.schedule_view;
-    if (!path) return;
+    if (!path) {
+      console.warn('[EnvScheduler Overview] schedule_view not configured — set it in the card editor');
+      return;
+    }
+    // Store selected room so the schedule card can pre-select it on load
+    if (roomId) sessionStorage.setItem('envscheduler_selected_room', roomId);
     history.pushState(null, '', path);
-    window.dispatchEvent(new CustomEvent('location-changed', { detail: { replace: false } }));
+    // Must fire on the element with bubbles+composed so HA's router catches it
+    this.dispatchEvent(new CustomEvent('location-changed', {
+      bubbles: true, composed: true, detail: { replace: false },
+    }));
   }
 
   // ------------------------------------------------------------------ render
@@ -294,13 +302,7 @@ class EnvironmentalSchedulerOverviewCardEditor extends HTMLElement {
 
     const personRows = persons.map((p, i) => `
       <div class="person-row">
-        <ha-entity-picker
-          .hass=${JSON.stringify({})}
-          .value="${p.entity || ''}"
-          .includeDomains='["person"]'
-          data-idx="${i}" data-field="entity"
-          label="Person entity">
-        </ha-entity-picker>
+        <ha-entity-picker data-idx="${i}" label="Person entity"></ha-entity-picker>
         <input class="name-input" type="text" placeholder="Display name"
                value="${p.name || ''}" data-idx="${i}" data-field="name">
         <button class="remove-btn" data-idx="${i}">✕</button>
@@ -349,13 +351,14 @@ class EnvironmentalSchedulerOverviewCardEditor extends HTMLElement {
     hpForm.data = hp;
     hpForm.addEventListener('value-changed', e => this._updateHp(e.detail.value));
 
-    // Person entity pickers
+    // Person entity pickers — must set value/hass as DOM properties, not attributes
     this.shadowRoot.querySelectorAll('ha-entity-picker').forEach(picker => {
-      picker.hass = this._hass;
+      const idx = parseInt(picker.dataset.idx);
+      picker.hass           = this._hass;
       picker.includeDomains = ['person'];
+      picker.value          = persons[idx]?.entity || '';
       picker.addEventListener('value-changed', e => {
-        const idx = parseInt(picker.dataset.idx);
-        this._updatePerson(idx, 'entity', e.detail.value);
+        this._updatePerson(parseInt(picker.dataset.idx), 'entity', e.detail.value);
       });
     });
 

@@ -7,7 +7,7 @@
 ## 1. CORE DATA MODEL
 
 ### 1.1 Block Structure
-A block is a temperature setpoint for a time range on a specific day.
+A block is a temperature setpoint (or on/off period) for a time range on a specific day.
 
 ```json
 {
@@ -23,6 +23,7 @@ A block is a temperature setpoint for a time range on a specific day.
 - Start time < end time (validated)
 - Temperature: global min/max (5–35°C, configurable at runtime)
 - Temperature precision: 0.5°C increments (TRV hardware)
+- For hot water zones, temperature represents the DHW setpoint (or is ignored for switch-type entities)
 - Enabled: boolean (block can be toggled without deletion)
 
 ### 1.2 Day Structure
@@ -41,6 +42,9 @@ Each room has a **single weekly schedule**. There are no per-profile schedules.
 {
   "id": "living_room",
   "name": "Living Room",
+  "entity_type": "heating",
+  "climate_entity": "climate.living_room_trv",
+  "hot_water_entity": null,
   "weekly_schedule": {
     "monday": [block, block, ...],
     "tuesday": [...],
@@ -53,9 +57,23 @@ Each room has a **single weekly schedule**. There are no per-profile schedules.
     "windows": { "action": "turn_off" }
   },
   "away_temp": null,
-  "fallback_temp": null
+  "fallback_temp": null,
+  "preheat_offset_minutes": 0
 }
 ```
+
+**`entity_type`** — controls how the integration (and Node-RED) interprets the zone:
+
+| Value | Description |
+|---|---|
+| `heating` | Room with a climate/TRV entity. Blocks define target temperature. |
+| `hot_water` | Hot water zone. Blocks define "ready by" windows. Temperature = DHW setpoint if entity supports it. |
+
+**`climate_entity`** — HA `climate.*` or `water_heater.*` entity to control directly (heating zones). `null` = integration skips direct control for this room (Node-RED handles it).
+
+**`hot_water_entity`** — HA `switch.*` or `water_heater.*` entity for hot water zones. `null` = integration skips direct control.
+
+**`preheat_offset_minutes`** — minutes before a block's start time to begin pre-heating. Applies to both heating and hot water zones. Default: 0. Written back by Node-RED as it learns; manually editable via options flow.
 
 - `persons`: list of person IDs whose presence activates this room
 - `away_temp`: per-room override when persons are away (null = use global)
@@ -108,6 +126,7 @@ Single JSON file via HA's built-in storage API.
 ```json
 {
   "house_mode": "normal",
+  "node_red_mode": false,
   "vacation_temp": 7.0,
   "global_away_temp": 10.0,
   "global_fallback_temp": 15.0,
@@ -122,6 +141,8 @@ Single JSON file via HA's built-in storage API.
   "logging_level": "info"
 }
 ```
+
+**`node_red_mode`** — when `true`, the integration fires events and steps back; Node-RED owns all entity control. When `false`, the integration controls entities directly using stored offsets and schedules. Default: `false`.
 
 ---
 
@@ -155,6 +176,8 @@ For any room at any time, the target temperature is resolved in this priority or
 
 Rooms with no persons assigned always follow their schedule (treated as always-occupied).
 
+Hot water zones follow the same priority rules. Away/vacation modes suppress hot water heating.
+
 ---
 
 ## 5. DEFAULT TEMPERATURES & FALLBACKS
@@ -182,6 +205,7 @@ Per-room overrides (`away_temp`, `fallback_temp`) take priority when set.
 - User switches via dashboard or Node-RED service call
 - `set_vacation_mode(true)` is a convenience alias for `set_house_mode(vacation)`
 - Switching is instant
+- On mode change, integration immediately applies new temperatures to all rooms with configured entities (unless `node_red_mode` is `true`)
 
 ### 6.3 Person Presence
 - Each person linked to a HA `person.*` entity
@@ -223,7 +247,52 @@ Per-room overrides (`away_temp`, `fallback_temp`) take priority when set.
 
 ---
 
-### 7.3 Service: `environmental_scheduler.set_house_mode`
+### 7.3 Service: `environmental_scheduler.get_upcoming_blocks`
+Returns the next N blocks for a room starting from now, used by Node-RED to calculate pre-heat start times. Spans today and tomorrow as needed.
+
+**Input:**
+```json
+{ "room": "living_room", "limit": 5 }
+```
+
+`limit` is optional (default: 5).
+
+**Output:**
+```json
+{
+  "room": "living_room",
+  "entity_type": "heating",
+  "preheat_offset_minutes": 20,
+  "upcoming": [
+    {
+      "day": "monday",
+      "block": { "id": "block_1", "start_time": "17:00", "end_time": "23:00", "temperature": 21, "enabled": true },
+      "preheat_start": "16:40"
+    }
+  ]
+}
+```
+
+`preheat_start` = `block.start_time - preheat_offset_minutes`. Pre-calculated so Node-RED doesn't need to.
+
+---
+
+### 7.4 Service: `environmental_scheduler.set_preheat_offset`
+Written back by Node-RED as it learns. Also settable manually via options flow or dashboard.
+
+**Input:**
+```json
+{ "room": "living_room", "offset_minutes": 25 }
+```
+
+**Output:**
+```json
+{ "status": "ok", "room": "living_room", "offset_minutes": 25 }
+```
+
+---
+
+### 7.5 Service: `environmental_scheduler.set_house_mode`
 **Input:**
 ```json
 { "mode": "away" }
@@ -238,7 +307,7 @@ Fires event `environmental_scheduler.house_mode_changed`.
 
 ---
 
-### 7.4 Service: `environmental_scheduler.set_vacation_mode`
+### 7.6 Service: `environmental_scheduler.set_vacation_mode`
 Convenience alias.
 
 **Input:** `{ "enabled": true }`
@@ -246,7 +315,7 @@ Sets house mode to `vacation`. `false` sets it back to `normal`.
 
 ---
 
-### 7.5 Events
+### 7.7 Events
 
 **`environmental_scheduler.house_mode_changed`**
 ```json
@@ -278,45 +347,95 @@ Sets house mode to `vacation`. `false` sets it back to `normal`.
 }
 ```
 
+**`environmental_scheduler.pre_block_start`**
+Fired `preheat_offset_minutes` before a block's start time. Fired regardless of `node_red_mode` — allows Node-RED to act even in HA mode (e.g. for cheap-rate decisions).
+```json
+{
+  "room": "living_room",
+  "entity_type": "heating",
+  "block": { "id": "block_1", "start_time": "17:00", "end_time": "23:00", "temperature": 21 },
+  "preheat_offset_minutes": 20,
+  "scheduled_start": "17:00",
+  "preheat_fire_time": "16:40",
+  "node_red_mode": false
+}
+```
+
 ---
 
-## 8. DASHBOARD OPERATIONS
+## 8. DIRECT ENTITY CONTROL (HA MODE)
+
+When `node_red_mode` is `false` and a room has a configured entity, the integration controls it directly.
+
+### 8.1 Heating Zones (`climate_entity` set)
+| Trigger | Action |
+|---|---|
+| `pre_block_start` fires | `climate.set_temperature` → block temperature |
+| Block ends / no active block | `climate.set_temperature` → `fallback_temp` |
+| House mode → away | `climate.set_temperature` → `away_temp` |
+| House mode → vacation | `climate.set_temperature` → `vacation_temp` |
+| Person(s) leave | `climate.set_temperature` → `away_temp` |
+| Person(s) return | Re-evaluate schedule → apply current target |
+| Door/window opens | Apply `door_window_actions` after delay |
+| Door/window closes | Restore previous target after all closed |
+
+### 8.2 Hot Water Zones (`hot_water_entity` set)
+| Trigger | Action |
+|---|---|
+| `pre_block_start` fires | `switch.turn_on` or `water_heater.set_operation_mode` → heat |
+| Block ends | `switch.turn_off` or set to idle/off mode |
+| House mode → away / vacation | `switch.turn_off` |
+
+### 8.3 Node-RED Mode (`node_red_mode: true`)
+Integration fires all events but does **not** call any HA entity services. Node-RED is fully responsible for entity control. The integration still resolves and returns the correct target temperature via `get_active_block`.
+
+### 8.4 Mixed Mode
+Rooms without a configured entity are always skipped for direct control, regardless of `node_red_mode`. This allows a hybrid setup — e.g. HA controls most rooms, Node-RED handles specific rooms (like hot water with Octopus tariff logic).
+
+---
+
+## 9. DASHBOARD OPERATIONS
 
 All block/room/person create-update-delete operations are dashboard-only.
 
-### 8.1 Block Operations
+### 9.1 Block Operations
 - Add, edit, delete blocks per room per day
 - Duplicate block within a day or copy to another day
 - Copy a full day's schedule to other days
 - Toggle block enabled/disabled
 - Drag-and-drop reorder (chronological)
 
-### 8.2 Room Operations
+### 9.2 Room Operations
 - Create, edit, delete rooms
+- Set room entity type (heating / hot_water)
+- Set climate_entity / hot_water_entity
 - Assign persons to rooms
 - Set per-room away/fallback temperatures
 - Configure occupancy entity and door/window actions
+- View and manually set preheat offset
 
-### 8.3 Person Operations
+### 9.3 Person Operations
 - Add person (name + HA entity)
 - Edit, delete person
 - Assign to rooms
 
-### 8.4 System Operations
+### 9.4 System Operations
 - Switch house mode
 - Toggle vacation mode
+- Toggle Node-RED mode
 - Edit global temperatures
 - Export/import schedules (JSON)
 
 ---
 
-## 9. ROOM CONFIGURATION
+## 10. ROOM CONFIGURATION
 
-### 9.1 Required per Room
+### 10.1 Required per Room
 ```json
 {
   "id": "living_room",
   "name": "Living Room",
+  "entity_type": "heating",
   "persons": ["person_david"],
   "door_window_actions": {
     "doors": { "action": "drop_by", "value": 3 },
@@ -325,57 +444,78 @@ All block/room/person create-update-delete operations are dashboard-only.
 }
 ```
 
-### 9.2 Door/Window Actions
+### 10.2 Door/Window Actions
 - `turn_off`: heating off while open
 - `drop_by: X`: reduce temp by X°C while open
-- Applied after 5-minute delay
+- Applied after 5-minute delay (configurable via `door_window_delay_seconds`)
+- All openings must close before the action reverts; timer resets if any re-open
 
-### 9.3 Entity Discovery
+### 10.3 Entity Discovery
 - Door/window entities: scan HA for `binary_sensor.*_door*` / `*_window*`
 - Occupancy entity: user specifies (not auto-discovered)
 
+### 10.4 Hot Water Zone
+Hot water is a room with `entity_type: hot_water`. Blocks define the periods during which hot water should be available ("ready by" windows). Pre-heat offset works identically to heating zones — the integration (or Node-RED) starts the DHW cycle early enough.
+
+```json
+{
+  "id": "hot_water",
+  "name": "Hot Water",
+  "entity_type": "hot_water",
+  "hot_water_entity": "switch.immersion_heater",
+  "persons": [],
+  "preheat_offset_minutes": 35
+}
+```
+
 ---
 
-## 10. EDGE CASES & SPECIAL STATES
+## 11. EDGE CASES & SPECIAL STATES
 
-### 10.1 Vacation Mode
+### 11.1 Vacation Mode
 - `house_mode = vacation` → all rooms at `vacation_temp` (7°C default)
 - Overrides schedules, person presence, and away mode
+- Hot water zones suppressed in vacation mode
 
-### 10.2 No Person Data
+### 11.2 No Person Data
 - If person entity missing/unavailable: treat as home
 - Log warning; do not change room behaviour
 
-### 10.3 Room with No Persons Assigned
+### 11.3 Room with No Persons Assigned
 - Treated as always-occupied
 - Follows schedule; never enters away state based on presence
 
-### 10.4 Multiple Doors/Windows
-- All must close before action reverts (5-min timer resets if any re-open)
+### 11.4 Multiple Doors/Windows
+- All must close before action reverts (timer resets if any re-open)
+
+### 11.5 No Entity Configured
+- Integration skips direct control for that room regardless of `node_red_mode`
+- `get_active_block` and events still work normally
 
 ---
 
-## 11. SYSTEM-LEVEL CONFIGURATION
+## 12. SYSTEM-LEVEL CONFIGURATION
 
 All stored in `config` block of the storage file.
 
-### 11.1 Versioning
+### 12.1 Versioning
 - `STORAGE_VERSION = 1` in code
 - Migrations applied on load if version mismatch
 
-### 11.2 Editable via Dashboard
+### 12.2 Editable via Options Flow / Dashboard
+- `node_red_mode` toggle
 - Global temperatures (away, fallback, vacation)
 - House mode
 - Min block duration
 - Logging level
 
-### 11.3 Code-Only (Restart Required)
+### 12.3 Code-Only (Restart Required)
 - Min/max temperature bounds
 - Heating/cooling buffer
 
 ---
 
-## 12. VALIDATION RULES
+## 13. VALIDATION RULES
 
 Enforced on every block save:
 
@@ -389,51 +529,76 @@ Enforced on every block save:
 
 ---
 
-## 13. NODE-RED INTEGRATION
+## 14. NODE-RED INTEGRATION
 
-### 13.1 Scheduler → Node-RED
+Node-RED is **optional**. The integration is fully functional without it. Node-RED adds predictive and adaptive intelligence on top.
+
+### 14.1 Scheduler → Node-RED
 - `environmental_scheduler.get_active_block(room)` → target temp + reason
 - `environmental_scheduler.get_blocks(room, day)` → full or filtered schedule
-- Events: `house_mode_changed`, `block_changed`, `active_block_changed`
+- `environmental_scheduler.get_upcoming_blocks(room, limit)` → next N blocks with pre-heat start times
+- Events: `house_mode_changed`, `block_changed`, `active_block_changed`, `pre_block_start`
 
-### 13.2 Node-RED → Scheduler
+### 14.2 Node-RED → Scheduler
 - `environmental_scheduler.set_house_mode(mode)`
 - `environmental_scheduler.set_vacation_mode(enabled)`
+- `environmental_scheduler.set_preheat_offset(room, offset_minutes)` — write back learned offset
 
-### 13.3 Scheduler Does NOT
-- Know about heating/cooling decisions
-- Control TRV or AC entities directly
-- Know about cheap-rate electricity logic
-- Own occupancy logic beyond reading HA person state
+### 14.3 Predictive Pre-Heating (Node-RED)
+1. Listen for `pre_block_start` event
+2. Read current room temperature and outdoor temperature
+3. Start heating early enough to reach target by `block.start_time`
+4. Observe actual heat-up time; write back adjusted offset via `set_preheat_offset`
 
-**Node-RED owns all heating/cooling logic.**
+Inputs to the learning model (all available from HA):
+- Current room temperature (thermostat entity)
+- Target block temperature
+- Outdoor temperature (heat pump / weather entity)
+- Time of day, previous room history
+
+### 14.4 Hot Water (Node-RED)
+1. Listen for `pre_block_start` on hot water zones
+2. Command heat pump into DHW mode
+3. Monitor water temperature; write back adjusted offset as it learns heat-up time
+
+### 14.5 Cheap-Rate Electricity Logic (Node-RED)
+- Octopus Agile / Go rate data is external to the scheduler
+- Node-RED combines rate windows with upcoming block schedule to optimise when to pre-heat
+- Scheduler has no awareness of tariff data
+
+### 14.6 What the Scheduler Does NOT Own
+- The learning algorithm for pre-heat offsets
+- Cheap-rate electricity decisions
+- Occupancy logic beyond reading HA person state
 
 ---
 
-## 14. FUTURE FEATURES
+## 15. FUTURE FEATURES
 
 Schema is forward-compatible with:
 - Guest bedroom override schedules (per-visit, per-person)
-- Cooling schedules (separate from heating)
+- Cooling schedules (separate from heating; `entity_type: cooling`)
+- AC control
 - Humidity scheduling
 - Per-season schedule variations
 - Holiday mode (distinct from vacation)
-- Door/window sensor automation
+- Manual boost (temporary block via dashboard or Node-RED)
 
 **Not in current scope.**
 
 ---
 
-## 15. SUMMARY: CORE RESPONSIBILITIES
+## 16. SUMMARY: CORE RESPONSIBILITIES
 
 | Component | Responsible For |
 |---|---|
-| **Scheduler** | Block storage, room schedules, person presence lookup, house mode, active temp resolution |
-| **Dashboard** | Create/edit/delete blocks, rooms, persons; mode switching; export/import |
-| **Node-RED** | Heating/cooling logic, TRV control, setpoint decisions, cheap-rate logic |
-| **HA** | Person tracking, door/window sensors, MQTT broker, entity state |
+| **Scheduler** | Block storage, room schedules, person presence, house mode, active temp resolution, preheat offset storage, pre-block event firing, direct entity control (HA mode) |
+| **Dashboard** | Create/edit/delete blocks, rooms, persons; mode switching; node_red_mode toggle; export/import |
+| **Node-RED** | Pre-heat learning, thermostat/TRV control (Node-RED mode), hot water DHW control, cheap-rate optimisation |
+| **HA** | Person tracking, door/window sensors, thermostat entities, heat pump integration |
 
-**Scheduler is dumb. Node-RED is smart.**
+**With `node_red_mode: false` (default) — zero Node-RED required. Everything works out of the box once entities are configured.**
+**With `node_red_mode: true` — integration steps back; Node-RED owns all entity control and can apply intelligent pre-heating and tariff logic.**
 
 ---
 

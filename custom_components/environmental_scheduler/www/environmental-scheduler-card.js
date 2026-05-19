@@ -75,7 +75,13 @@ class EnvironmentalSchedulerCard extends HTMLElement {
     try {
       const r = await this._call('get_rooms', {});
       this._rooms = r.rooms || [];
-      if (this._rooms.length && !this._selectedRoom) this._selectedRoom = this._rooms[0].id;
+      const preSelected = sessionStorage.getItem('envscheduler_selected_room');
+      if (preSelected && this._rooms.find(r => r.id === preSelected)) {
+        this._selectedRoom = preSelected;
+        sessionStorage.removeItem('envscheduler_selected_room');
+      } else if (this._rooms.length && !this._selectedRoom) {
+        this._selectedRoom = this._rooms[0].id;
+      }
     } catch(e) { console.error('[EnvScheduler] load rooms', e); }
     this._render();
   }

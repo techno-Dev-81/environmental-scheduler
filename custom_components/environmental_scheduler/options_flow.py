@@ -1,0 +1,256 @@
+from __future__ import annotations
+
+import uuid
+
+import voluptuous as vol
+from homeassistant import config_entries
+from homeassistant.helpers import selector
+
+from .const import DOMAIN, TEMP_MAX, TEMP_MIN
+from .models import Person
+from .storage import SchedulerStore
+
+_MENU_OPTIONS = ["global_settings", "manage_persons", "room_settings"]
+
+_TEMP_SELECTOR = selector.selector({
+    "number": {"min": TEMP_MIN, "max": TEMP_MAX, "step": 0.5, "unit_of_measurement": "°C", "mode": "box"},
+})
+_PERSON_ENTITY_SELECTOR = selector.selector({
+    "entity": {"domain": "person"},
+})
+_CLIMATE_ENTITY_SELECTOR = selector.selector({
+    "entity": {"domain": ["climate", "water_heater"]},
+})
+_SWITCH_ENTITY_SELECTOR = selector.selector({
+    "entity": {"domain": ["switch", "water_heater"]},
+})
+_TEXT_SELECTOR = selector.selector({"text": {}})
+_BOOL_SELECTOR = selector.selector({"boolean": {}})
+
+
+def _get_store(hass, entry_id: str) -> SchedulerStore:
+    return hass.data[DOMAIN][entry_id]
+
+
+class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self._entry_id = config_entry.entry_id
+        self._edit_person_id: str | None = None
+        self._edit_room_id: str | None = None
+
+    # ------------------------------------------------------------------
+    # Entry menu
+    # ------------------------------------------------------------------
+
+    async def async_step_init(self, user_input=None):
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=_MENU_OPTIONS,
+        )
+
+    # ------------------------------------------------------------------
+    # Global settings
+    # ------------------------------------------------------------------
+
+    async def async_step_global_settings(self, user_input=None):
+        store = _get_store(self.hass, self._entry_id)
+        config = store.get_config()
+        errors = {}
+
+        if user_input is not None:
+            config.node_red_mode = user_input["node_red_mode"]
+            config.vacation_temp = user_input["vacation_temp"]
+            config.global_away_temp = user_input["global_away_temp"]
+            config.global_fallback_temp = user_input["global_fallback_temp"]
+            store.update_config(config)
+            await store.async_save()
+            return self.async_create_entry(title="", data={})
+
+        schema = vol.Schema({
+            vol.Required("node_red_mode", default=config.node_red_mode): _BOOL_SELECTOR,
+            vol.Required("vacation_temp", default=config.vacation_temp): _TEMP_SELECTOR,
+            vol.Required("global_away_temp", default=config.global_away_temp): _TEMP_SELECTOR,
+            vol.Required("global_fallback_temp", default=config.global_fallback_temp): _TEMP_SELECTOR,
+        })
+        return self.async_show_form(
+            step_id="global_settings",
+            data_schema=schema,
+            errors=errors,
+        )
+
+    # ------------------------------------------------------------------
+    # Manage persons — list / pick action
+    # ------------------------------------------------------------------
+
+    async def async_step_manage_persons(self, user_input=None):
+        store = _get_store(self.hass, self._entry_id)
+        persons = store.get_persons()
+
+        choices = {p.id: f"{p.name} ({p.ha_entity})" for p in persons}
+        choices["__add__"] = "➕ Add new person"
+
+        if user_input is not None:
+            selection = user_input.get("person")
+            if selection == "__add__":
+                return await self.async_step_add_person()
+            self._edit_person_id = selection
+            return await self.async_step_edit_person()
+
+        schema = vol.Schema({
+            vol.Required("person"): selector.selector({
+                "select": {
+                    "options": [{"value": k, "label": v} for k, v in choices.items()],
+                    "mode": "list",
+                }
+            }),
+        })
+        return self.async_show_form(step_id="manage_persons", data_schema=schema)
+
+    # ------------------------------------------------------------------
+    # Add person
+    # ------------------------------------------------------------------
+
+    async def async_step_add_person(self, user_input=None):
+        store = _get_store(self.hass, self._entry_id)
+        errors = {}
+
+        if user_input is not None:
+            name = user_input["name"].strip()
+            ha_entity = user_input["ha_entity"]
+            if not name:
+                errors["name"] = "name_required"
+            else:
+                person_id = str(uuid.uuid4())[:8]
+                try:
+                    store.add_person(Person(id=person_id, name=name, ha_entity=ha_entity))
+                    await store.async_save()
+                    return self.async_create_entry(title="", data={})
+                except ValueError as e:
+                    errors["base"] = str(e)
+
+        schema = vol.Schema({
+            vol.Required("name"): _TEXT_SELECTOR,
+            vol.Required("ha_entity"): _PERSON_ENTITY_SELECTOR,
+        })
+        return self.async_show_form(step_id="add_person", data_schema=schema, errors=errors)
+
+    # ------------------------------------------------------------------
+    # Edit / delete person
+    # ------------------------------------------------------------------
+
+    async def async_step_edit_person(self, user_input=None):
+        store = _get_store(self.hass, self._entry_id)
+        persons = store.get_persons()
+        person = next((p for p in persons if p.id == self._edit_person_id), None)
+        if not person:
+            return self.async_abort(reason="person_not_found")
+
+        errors = {}
+
+        if user_input is not None:
+            if user_input.get("delete"):
+                store.delete_person(person.id)
+                await store.async_save()
+                return self.async_create_entry(title="", data={})
+
+            name = user_input["name"].strip()
+            if not name:
+                errors["name"] = "name_required"
+            else:
+                store.update_person(Person(id=person.id, name=name, ha_entity=user_input["ha_entity"]))
+                await store.async_save()
+                return self.async_create_entry(title="", data={})
+
+        schema = vol.Schema({
+            vol.Required("name", default=person.name): _TEXT_SELECTOR,
+            vol.Required("ha_entity", default=person.ha_entity): _PERSON_ENTITY_SELECTOR,
+            vol.Optional("delete", default=False): selector.selector({"boolean": {}}),
+        })
+        return self.async_show_form(step_id="edit_person", data_schema=schema, errors=errors)
+
+    # ------------------------------------------------------------------
+    # Room settings — pick a room
+    # ------------------------------------------------------------------
+
+    async def async_step_room_settings(self, user_input=None):
+        store = _get_store(self.hass, self._entry_id)
+        rooms = store.get_rooms()
+
+        if user_input is not None:
+            self._edit_room_id = user_input["room"]
+            return await self.async_step_edit_room()
+
+        schema = vol.Schema({
+            vol.Required("room"): selector.selector({
+                "select": {
+                    "options": [{"value": r.id, "label": r.name} for r in rooms],
+                    "mode": "list",
+                }
+            }),
+        })
+        return self.async_show_form(step_id="room_settings", data_schema=schema)
+
+    # ------------------------------------------------------------------
+    # Edit room — away temp, fallback temp, assigned persons
+    # ------------------------------------------------------------------
+
+    async def async_step_edit_room(self, user_input=None):
+        store = _get_store(self.hass, self._entry_id)
+        room = store.get_room(self._edit_room_id)
+        if not room:
+            return self.async_abort(reason="room_not_found")
+
+        persons = store.get_persons()
+        person_options = [{"value": p.id, "label": f"{p.name} ({p.ha_entity})"} for p in persons]
+        config = store.get_config()
+
+        errors = {}
+
+        if user_input is not None:
+            room.entity_type = user_input["entity_type"]
+            room.climate_entity = user_input.get("climate_entity") or None
+            room.hot_water_entity = user_input.get("hot_water_entity") or None
+            room.preheat_offset_minutes = int(user_input.get("preheat_offset_minutes") or 0)
+            room.away_temp = user_input.get("away_temp") or None
+            room.fallback_temp = user_input.get("fallback_temp") or None
+            room.persons = user_input.get("persons") or []
+            store.update_room(room)
+            await store.async_save()
+            return self.async_create_entry(title="", data={})
+
+        away_default = room.away_temp if room.away_temp is not None else config.global_away_temp
+        fallback_default = room.fallback_temp if room.fallback_temp is not None else config.global_fallback_temp
+
+        schema_dict = {
+            vol.Required("entity_type", default=room.entity_type): selector.selector({
+                "select": {
+                    "options": [
+                        {"value": "heating", "label": "Heating (TRV / climate)"},
+                        {"value": "hot_water", "label": "Hot water"},
+                    ],
+                }
+            }),
+            vol.Optional("climate_entity", default=room.climate_entity or ""): _CLIMATE_ENTITY_SELECTOR,
+            vol.Optional("hot_water_entity", default=room.hot_water_entity or ""): _SWITCH_ENTITY_SELECTOR,
+            vol.Optional("preheat_offset_minutes", default=room.preheat_offset_minutes): selector.selector({
+                "number": {"min": 0, "max": 120, "step": 5, "unit_of_measurement": "min", "mode": "slider"},
+            }),
+            vol.Optional("away_temp", default=away_default): _TEMP_SELECTOR,
+            vol.Optional("fallback_temp", default=fallback_default): _TEMP_SELECTOR,
+        }
+        if person_options:
+            schema_dict[vol.Optional("persons", default=room.persons)] = selector.selector({
+                "select": {
+                    "options": person_options,
+                    "multiple": True,
+                    "mode": "list",
+                }
+            })
+
+        return self.async_show_form(
+            step_id="edit_room",
+            data_schema=vol.Schema(schema_dict),
+            description_placeholders={"room_name": room.name},
+            errors=errors,
+        )
