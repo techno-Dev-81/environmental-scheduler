@@ -1,7 +1,7 @@
 {
   "domain": "environmental_scheduler",
   "name": "Environmental Scheduler",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "documentation": "https://github.com/techno-Dev-81/environmental-scheduler",
   "issue_tracker": "https://github.com/techno-Dev-81/environmental-scheduler/issues",
   "dependencies": [],
