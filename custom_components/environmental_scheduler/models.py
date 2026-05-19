@@ -94,21 +94,19 @@ class Block:
         )
 
 
-ENTITY_TYPES = ["heating", "hot_water"]
-
-
 @dataclass
 class Room:
     id: str
     name: str
-    entity_type: str = "heating"
-    climate_entity: str | None = None
+    climate_entities: list[str] = field(default_factory=list)
     hot_water_entity: str | None = None
+    temperature_sensor: str | None = None
     preheat_offset_minutes: int = 0
     weekly_schedule: dict[str, list[Block]] = field(
         default_factory=lambda: {day: [] for day in DAYS_OF_WEEK}
     )
     persons: list[str] = field(default_factory=list)
+    persons_logic: str = "and"  # "and" = all away → cold; "or" = any away → cold
     occupancy_entity: str | None = None
     door_window_actions: dict = field(default_factory=dict)
     away_temp: float | None = None
@@ -123,25 +121,29 @@ class Room:
                 return block
         return None
 
-    def controllable_entity(self) -> str | None:
-        """Return whichever entity this room uses for direct control, or None."""
-        if self.entity_type == "hot_water":
-            return self.hot_water_entity
-        return self.climate_entity
+    @property
+    def entity_type(self) -> str:
+        return "hot_water" if self.hot_water_entity else "heating"
+
+    def controllable_entities(self) -> list[str]:
+        if self.hot_water_entity:
+            return [self.hot_water_entity]
+        return list(self.climate_entities)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "name": self.name,
-            "entity_type": self.entity_type,
-            "climate_entity": self.climate_entity,
+            "climate_entities": self.climate_entities,
             "hot_water_entity": self.hot_water_entity,
+            "temperature_sensor": self.temperature_sensor,
             "preheat_offset_minutes": self.preheat_offset_minutes,
             "weekly_schedule": {
                 day: [b.to_dict() for b in blocks]
                 for day, blocks in self.weekly_schedule.items()
             },
             "persons": self.persons,
+            "persons_logic": self.persons_logic,
             "occupancy_entity": self.occupancy_entity,
             "door_window_actions": self.door_window_actions,
             "away_temp": self.away_temp,
@@ -150,18 +152,22 @@ class Room:
 
     @staticmethod
     def from_dict(data: dict) -> "Room":
+        # Migrate legacy single climate_entity field
+        legacy_entity = data.get("climate_entity")
+        climate_entities = data.get("climate_entities") or ([legacy_entity] if legacy_entity else [])
         return Room(
             id=data["id"],
             name=data["name"],
-            entity_type=data.get("entity_type", "heating"),
-            climate_entity=data.get("climate_entity"),
+            climate_entities=climate_entities,
             hot_water_entity=data.get("hot_water_entity"),
+            temperature_sensor=data.get("temperature_sensor"),
             preheat_offset_minutes=int(data.get("preheat_offset_minutes", 0)),
             weekly_schedule={
                 day: [Block.from_dict(b) for b in blocks]
                 for day, blocks in data.get("weekly_schedule", {}).items()
             },
             persons=data.get("persons", []),
+            persons_logic=data.get("persons_logic", "and"),
             occupancy_entity=data.get("occupancy_entity"),
             door_window_actions=data.get("door_window_actions", {}),
             away_temp=data.get("away_temp"),

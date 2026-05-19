@@ -58,11 +58,21 @@ class EnvironmentalSchedulerOverviewCard extends HTMLElement {
   async _setup() {
     this._renderSkeleton();
     this._startRefresh();
+    this._subscribeEvents();
   }
 
   _startRefresh() {
     this._doRefresh();
     this._refreshTimer = setInterval(() => this._doRefresh(), 30000);
+  }
+
+  _subscribeEvents() {
+    // Instant refresh when house mode or any block changes
+    const conn = this._hass.connection;
+    const refresh = () => this._doRefresh();
+    conn.subscribeEvents(refresh, 'environmental_scheduler.house_mode_changed');
+    conn.subscribeEvents(refresh, 'environmental_scheduler.block_changed');
+    conn.subscribeEvents(refresh, 'environmental_scheduler.active_block_changed');
   }
 
   disconnectedCallback() {
