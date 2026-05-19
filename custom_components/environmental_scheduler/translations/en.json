@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Environmental Scheduler",
+        "description": "Click Submit to set up Environmental Scheduler. Rooms and schedules are configured from the integration page after setup."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one instance of Environmental Scheduler can be configured."
+    }
+  }
+}
