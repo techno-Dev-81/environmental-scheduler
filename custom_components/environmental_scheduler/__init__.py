@@ -5,8 +5,8 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DEFAULT_ROOMS, DOMAIN, HOUSE_PROFILES
-from .models import Profile, Room
+from .const import DEFAULT_ROOMS, DOMAIN
+from .models import Room
 from .services import register_services, unregister_services
 from .storage import SchedulerStore
 
@@ -23,7 +23,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await store.async_load()
 
     if not store.get_rooms():
-        _LOGGER.info("Seeding default rooms and profiles for Environmental Scheduler")
+        _LOGGER.info("Seeding default rooms for Environmental Scheduler")
         await _seed_defaults(store)
         await store.async_save()
 
@@ -46,8 +46,3 @@ async def _seed_defaults(store: SchedulerStore) -> None:
     for room_def in DEFAULT_ROOMS:
         room = Room(id=room_def["id"], name=room_def["name"])
         store.add_room(room)
-        store.get_config().active_profile_by_room[room.id] = "home"
-
-    for profile_name in HOUSE_PROFILES:
-        profile = Profile.new(name=profile_name, scope="house", room_id=None)
-        store.add_profile(profile)

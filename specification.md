@@ -7,7 +7,7 @@
 ## 1. CORE DATA MODEL
 
 ### 1.1 Block Structure
-A block is atomic and reusable across profiles, days, and rooms.
+A block is a temperature setpoint for a time range on a specific day.
 
 ```json
 {
@@ -21,227 +21,105 @@ A block is atomic and reusable across profiles, days, and rooms.
 
 **Constraints:**
 - Start time < end time (validated)
-- Temperature: global min/max (hard-coded, configurable at runtime)
+- Temperature: global min/max (5–35°C, configurable at runtime)
 - Temperature precision: 0.5°C increments (TRV hardware)
 - Enabled: boolean (block can be toggled without deletion)
-- No days-of-week field on block
 
 ### 1.2 Day Structure
-A day is a list of blocks for a specific day of the week.
-
-```json
-{
-  "day": "monday",
-  "blocks": [block_id_1, block_id_2, ...]
-}
-```
+A day is an ordered list of blocks for a specific day of the week, owned directly by a room.
 
 **Constraints:**
 - Days: Monday–Sunday (7 fixed days)
-- Blocks within a day must not overlap (prevented)
-- Blocks must be in chronological order (enforced on save)
-- Minimum block duration: 30 minutes (system-level)
+- Blocks within a day must not overlap (new block always wins — see §3)
+- Blocks are in chronological order (enforced on save)
+- Minimum block duration: 30 minutes
 
-### 1.3 Profile Structure
-A profile is a complete weekly schedule owned by a room (or house).
+### 1.3 Room Structure
+Each room has a **single weekly schedule**. There are no per-profile schedules.
 
 ```json
 {
-  "id": "profile_uuid",
-  "name": "Home",
-  "scope": "house" | "room",
-  "room_id": "living_room" (if scope: room),
-  "owner": "ashton" | "david" | "guest_lisa" (optional, metadata),
-  "is_guest": false,
+  "id": "living_room",
+  "name": "Living Room",
   "weekly_schedule": {
-    "monday": [block_ids],
-    "tuesday": [block_ids],
-    "wednesday": [block_ids],
-    "thursday": [block_ids],
-    "friday": [block_ids],
-    "saturday": [block_ids],
-    "sunday": [block_ids]
-  }
+    "monday": [block, block, ...],
+    "tuesday": [...],
+    ...
+  },
+  "persons": ["person_david", "person_ashton"],
+  "occupancy_entity": "binary_sensor.living_room_motion",
+  "door_window_actions": {
+    "doors": { "action": "drop_by", "value": 3 },
+    "windows": { "action": "turn_off" }
+  },
+  "away_temp": null,
+  "fallback_temp": null
 }
 ```
 
-**Constraints:**
-- House-level profiles: Home, Away, Night, Always On, Always Off (predefined, cannot delete)
-- Room-level guest profiles: user-created, named per guest (lisa, nichola, etc.)
-- Only one profile active per room at a time (user-selected or Node-RED-updated)
-- Guest profiles can span multiple rooms (same guest in different rooms on different visits)
+- `persons`: list of person IDs whose presence activates this room
+- `away_temp`: per-room override when persons are away (null = use global)
+- `fallback_temp`: per-room override when no block is active (null = use global)
+
+### 1.4 Person Structure
+Persons are tracked via Home Assistant person entities.
+
+```json
+{
+  "id": "person_david",
+  "name": "David",
+  "ha_entity": "person.david"
+}
+```
+
+- Presence is read live from HA state (`home` = present, anything else = away)
+- Unknown state defaults to home (safe — avoids under-heating)
+
+### 1.5 House Mode
+System-level state that overrides all room schedules.
+
+| Mode | Behaviour |
+|---|---|
+| `normal` | Follow room schedules; respect person presence |
+| `away` | All rooms use away temperature; ignore schedules |
+| `vacation` | All rooms use frost protection temperature (7°C); ignore everything |
 
 ---
 
 ## 2. STORAGE SCHEMA
 
 ### 2.1 File Structure
-One JSON file per room, per profile (scalable, modular).
+Single JSON file via HA's built-in storage API.
 
 ```
 .storage/
-  environmental_scheduler/
-    config.json                    (house-level config, versioning, defaults)
-    rooms.json                     (room definitions, occupancy entities, door/window patterns)
-    living_room/
-      profile_home.json            (house-level profile)
-      profile_away.json
-      profile_night.json
-      profile_always_on.json
-      profile_always_off.json
-      profile_guest_lisa.json       (room-level guest profile)
-      profile_guest_nichola.json
-    bedroom/
-      profile_home.json
-      profile_away.json
-      profile_night.json
-      profile_guest_lisa.json       (same guest, different room)
-    office/
-      profile_home.json
-      profile_away.json
+  environmental_scheduler     (single versioned JSON blob)
 ```
 
-### 2.2 Config File (house-level)
+### 2.2 Top-level Schema
 ```json
 {
-  "version": 1,
-  "schema_version": 1,
-  "system_config": {
-    "min_block_duration_minutes": 30,
-    "temperature_min": 5,
-    "temperature_max": 35,
-    "temperature_heating_cooling_buffer": 2.0,
-    "door_window_delay_seconds": 300,
-    "default_temps": {
-      "home": 15,
-      "away": 10,
-      "vacation": 5,
-      "night": 16
-    },
-    "mqtt_retry_interval_seconds": 5,
-    "mqtt_retry_exponential_backoff": true,
-    "mqtt_retry_max_attempts": 10,
-    "logging_level": "info"
-  },
-  "house_profiles": [
-    "home",
-    "away",
-    "night",
-    "always_on",
-    "always_off"
+  "config": { ...SystemConfig... },
+  "rooms": [ ...Room objects with embedded weekly_schedule... ]
+}
+```
+
+### 2.3 Config Object
+```json
+{
+  "house_mode": "normal",
+  "vacation_temp": 7.0,
+  "global_away_temp": 10.0,
+  "global_fallback_temp": 15.0,
+  "min_block_duration_minutes": 30,
+  "temperature_min": 5,
+  "temperature_max": 35,
+  "temperature_heating_cooling_buffer": 2.0,
+  "door_window_delay_seconds": 300,
+  "persons": [
+    { "id": "person_david", "name": "David", "ha_entity": "person.david" }
   ],
-  "active_profile_by_room": {
-    "living_room": "home",
-    "bedroom": "home",
-    "office": "home"
-  },
-  "vacation_mode": false
-}
-```
-
-### 2.3 Rooms File
-```json
-{
-  "rooms": [
-    {
-      "id": "living_room",
-      "name": "Living Room",
-      "occupancy_entity": "binary_sensor.living_room_motion",
-      "door_window_actions": {
-        "doors": {
-          "action": "drop_by",
-          "value": 3
-        },
-        "windows": {
-          "action": "drop_by",
-          "value": 2
-        }
-      },
-      "guest_profiles": [
-        "guest_lisa",
-        "guest_nichola"
-      ]
-    },
-    {
-      "id": "bedroom",
-      "name": "Bedroom",
-      "occupancy_entity": "binary_sensor.bedroom_motion",
-      "door_window_actions": {
-        "doors": {
-          "action": "turn_off"
-        },
-        "windows": {
-          "action": "turn_off"
-        }
-      },
-      "guest_profiles": [
-        "guest_lisa"
-      ]
-    }
-  ]
-}
-```
-
-**Door/Window Actions:**
-- `turn_off`: heating off while door/window open
-- `drop_by: X`: reduce temp by X°C while open
-- Applied after 5-minute delay (door/window must be open 5+ min to trigger)
-
-### 2.4 Profile File Example
-```json
-{
-  "id": "profile_home_uuid",
-  "name": "Home",
-  "scope": "house",
-  "is_guest": false,
-  "weekly_schedule": {
-    "monday": [
-      {
-        "id": "block_1",
-        "start_time": "06:30",
-        "end_time": "09:00",
-        "temperature": 21,
-        "enabled": true
-      },
-      {
-        "id": "block_2",
-        "start_time": "09:00",
-        "end_time": "17:00",
-        "temperature": 19,
-        "enabled": true
-      },
-      {
-        "id": "block_3",
-        "start_time": "17:00",
-        "end_time": "23:00",
-        "temperature": 21,
-        "enabled": true
-      }
-    ],
-    "tuesday": [
-      {
-        "id": "block_1",
-        "start_time": "06:30",
-        "end_time": "09:00",
-        "temperature": 21,
-        "enabled": true
-      },
-      {
-        "id": "block_2",
-        "start_time": "09:00",
-        "end_time": "17:00",
-        "temperature": 20,
-        "enabled": false
-      }
-    ],
-    "wednesday": [],
-    "thursday": [],
-    "friday": [],
-    "saturday": [],
-    "sunday": []
-  },
-  "created_at": "2025-05-08T10:00:00Z",
-  "last_modified": "2025-05-08T10:00:00Z"
+  "logging_level": "info"
 }
 ```
 
@@ -253,105 +131,63 @@ One JSON file per room, per profile (scalable, modular).
 Two blocks overlap if: `block_a.start < block_b.end AND block_a.end > block_b.start`
 
 ### 3.2 Resolution on Save
-When user attempts to save a new/edited block:
+The **new block always wins**.
 
 1. Check for overlaps in the target day
-2. If overlap detected with existing block(s):
-   - **The new block always wins** — it is the user's intent
-   - Calculate the impact on each existing block:
-     - Existing block can be **trimmed** (result still >= 30 min): show confirmation prompt with proposed trim
-     - Existing block must be **deleted** (result < 30 min or fully consumed): show confirmation prompt with deletion warning
-   - User can **confirm** to proceed or **postpone** to go back and adjust the new block
-3. If user confirms, apply all trims/deletions and save the new block
-
-### 3.3 Validation
-On any block save:
-- Start < end
-- Duration >= 30 minutes
-- Temperature within global min/max
-- No overlaps (after trimming or deletion)
+2. For each conflicting existing block:
+   - If trimming it leaves >= 30 min: action = `trim`
+   - If trimming would leave < 30 min or it's fully consumed: action = `delete`
+3. Show confirmation prompt listing each affected block and the action
+4. User confirms or postpones
+5. On confirm: apply trims/deletions atomically, insert new block, re-sort by start time
 
 ---
 
-## 4. ACTIVE BLOCK LOGIC
+## 4. ACTIVE TEMPERATURE RESOLUTION
 
-### 4.1 Getting the Active Block
-At any given time, the system returns the currently active block for a room.
+For any room at any time, the target temperature is resolved in this priority order:
 
-```
-current_time = 14:30
-today = tuesday
-active_profile = "home"
-room = "living_room"
+1. **Vacation mode** → `vacation_temp` (e.g. 7°C) — overrides everything
+2. **Away mode** → room `away_temp` or `global_away_temp`
+3. **Normal mode, all associated persons away** → room `away_temp` or `global_away_temp`
+4. **Normal mode, person(s) home, active block** → block temperature
+5. **Normal mode, person(s) home, no active block** → room `fallback_temp` or `global_fallback_temp`
 
-→ Query profile "home" for room "living_room"
-→ Get tuesday schedule
-→ Find block where start <= 14:30 < end
-→ Return block object (or null if no active block)
-```
-
-### 4.2 No Active Block
-If no block matches current time:
-- Return `null`
-- Node-RED uses fallback logic (see 5.2)
-
-### 4.3 Gaps Between Blocks
-If there's a gap (e.g., 09:00–17:00 block ends, next block starts 18:00):
-- No active block during 17:00–18:00
-- Node-RED handles temperature during gap (holds last, uses default, etc.)
+Rooms with no persons assigned always follow their schedule (treated as always-occupied).
 
 ---
 
 ## 5. DEFAULT TEMPERATURES & FALLBACKS
 
-### 5.1 Global Defaults (System-Level)
 ```json
-"default_temps": {
-  "home": 15,
-  "away": 10,
-  "vacation": 5,
-  "night": 16
+{
+  "vacation_temp": 7.0,
+  "global_away_temp": 10.0,
+  "global_fallback_temp": 15.0
 }
 ```
 
-### 5.2 When No Active Block
-If no block is currently active in the room:
-
-1. Check vacation mode (system-level)
-   - If true: use `default_temps.vacation` (overrides all)
-2. Check house profile status (Home/Away/Night/etc.)
-   - Use corresponding default_temps value
-3. Return that temperature to Node-RED
+Per-room overrides (`away_temp`, `fallback_temp`) take priority when set.
 
 ---
 
-## 6. PROFILE SYSTEM
+## 6. HOUSE MODE SYSTEM
 
-### 6.1 House-Level Profiles (Global, Predefined)
-- Home
-- Away
-- Night
-- Always On
-- Always Off
+### 6.1 Modes
+- **Normal** — schedules and person presence govern each room
+- **Away** — system-wide reduced temperature; person presence ignored
+- **Vacation** — frost protection for all rooms; all schedules ignored
 
-Each house-level profile exists for every room (not room-specific).
+### 6.2 Mode Switching
+- User switches via dashboard or Node-RED service call
+- `set_vacation_mode(true)` is a convenience alias for `set_house_mode(vacation)`
+- Switching is instant
 
-### 6.2 Room-Level Guest Profiles (Per-Room, User-Created)
-- Named per guest: `guest_lisa`, `guest_nichola`, etc.
-- Assigned to specific room(s)
-- Each guest can have multiple room assignments (different rooms, different visits)
-- Guest profile in a room overrides house profile (if active)
-
-### 6.3 Active Profile Selection
-- User manually selects active profile per room (via dashboard)
-- Node-RED can call `scheduler.set_profile(room, profile)` to change
-- Only one profile active per room at a time
-- Profile switching is instant (blocks change immediately)
-
-### 6.4 Guest Profile Constraints
-- At least one house-level profile must remain active globally
-- If guest profile is active in a room, that room's blocks come from guest profile
-- Other rooms continue using their selected house profile
+### 6.3 Person Presence
+- Each person linked to a HA `person.*` entity
+- Presence state read live — no polling, no cache
+- If HA entity missing or unavailable: assume home (safe default)
+- Rooms can be assigned to specific persons; unassigned rooms are always-active
 
 ---
 
@@ -360,99 +196,84 @@ Each house-level profile exists for every room (not room-specific).
 ### 7.1 Service: `environmental_scheduler.get_active_block`
 **Input:**
 ```json
-{
-  "room": "living_room"
-}
+{ "room": "living_room" }
 ```
 
 **Output:**
 ```json
 {
-  "id": "block_1",
-  "start_time": "06:30",
-  "end_time": "09:00",
-  "temperature": 21,
-  "enabled": true,
-  "profile": "home"
+  "active_block": { "id": "block_1", "start_time": "06:30", "end_time": "09:00", "temperature": 21, "enabled": true },
+  "target_temperature": 21,
+  "reason": "schedule"
 }
 ```
 
-Or `null` if no active block.
+`reason` is one of: `schedule`, `fallback`, `away`, `persons_away`, `vacation`
+`active_block` is `null` when reason is not `schedule`
+
+---
 
 ### 7.2 Service: `environmental_scheduler.get_blocks`
 **Input:**
 ```json
-{
-  "room": "living_room",
-  "profile": "home" (optional, filter by profile),
-  "day": "monday" (optional, filter by day)
-}
+{ "room": "living_room", "day": "monday" }
 ```
 
-**Output:**
-```json
-{
-  "room": "living_room",
-  "profile": "home",
-  "schedule": {
-    "monday": [block_1, block_2, ...],
-    "tuesday": [block_1, block_3, ...],
-    ...
-  }
-}
-```
+`day` is optional. Omit to return the full weekly schedule.
 
-### 7.3 Service: `environmental_scheduler.set_profile`
+---
+
+### 7.3 Service: `environmental_scheduler.set_house_mode`
 **Input:**
 ```json
-{
-  "room": "living_room",
-  "profile": "away"
-}
+{ "mode": "away" }
 ```
 
 **Output:**
 ```json
+{ "success": true, "previous_mode": "normal", "active_mode": "away" }
+```
+
+Fires event `environmental_scheduler.house_mode_changed`.
+
+---
+
+### 7.4 Service: `environmental_scheduler.set_vacation_mode`
+Convenience alias.
+
+**Input:** `{ "enabled": true }`
+Sets house mode to `vacation`. `false` sets it back to `normal`.
+
+---
+
+### 7.5 Events
+
+**`environmental_scheduler.house_mode_changed`**
+```json
 {
-  "success": true,
-  "previous_profile": "home",
-  "active_profile": "away",
-  "active_block": {...}
+  "previous_mode": "normal",
+  "active_mode": "away",
+  "triggered_by": "service" | "dashboard"
 }
 ```
 
-### 7.4 Events
-**Event: `environmental_scheduler.block_changed`**
+**`environmental_scheduler.block_changed`**
 ```json
 {
   "room": "living_room",
-  "profile": "home",
   "day": "monday",
-  "block": {...},
+  "block": { ... },
   "action": "created" | "updated" | "deleted" | "enabled" | "disabled",
   "timestamp": "2025-05-08T14:30:00Z"
 }
 ```
 
-**Event: `environmental_scheduler.profile_changed`**
+**`environmental_scheduler.active_block_changed`**
 ```json
 {
   "room": "living_room",
-  "previous_profile": "home",
-  "active_profile": "away",
-  "active_block": {...},
-  "triggered_by": "user" | "node_red" | "automation",
-  "timestamp": "2025-05-08T14:30:00Z"
-}
-```
-
-**Event: `environmental_scheduler.active_block_changed`**
-```json
-{
-  "room": "living_room",
-  "profile": "home",
-  "previous_block": {...},
-  "active_block": {...},
+  "previous_block": { ... },
+  "active_block": { ... },
   "timestamp": "2025-05-08T14:30:00Z"
 }
 ```
@@ -461,35 +282,31 @@ Or `null` if no active block.
 
 ## 8. DASHBOARD OPERATIONS
 
-All create/update/delete operations happen via dashboard (not Node-RED).
+All block/room/person create-update-delete operations are dashboard-only.
 
 ### 8.1 Block Operations
-- **Add block** to a day in a profile
-- **Edit block** (start, end, temp, enabled flag)
-- **Delete block**
-- **Duplicate block** (within same day or copy to another day)
-- **Copy day** to other day(s), then edit as needed
-- **Reorder blocks** within a day (drag-and-drop, chronological)
-- **Disable/enable block** (toggle without deletion)
+- Add, edit, delete blocks per room per day
+- Duplicate block within a day or copy to another day
+- Copy a full day's schedule to other days
+- Toggle block enabled/disabled
+- Drag-and-drop reorder (chronological)
 
-### 8.2 Profile Operations
-- **Create guest profile** (room-level, named per guest)
-- **Delete guest profile**
-- **Set active profile** (per room)
-- **Assign guest profile to room** (assign existing guest to new room)
-- **Clone profile** between rooms (copy all blocks from room A to room B)
+### 8.2 Room Operations
+- Create, edit, delete rooms
+- Assign persons to rooms
+- Set per-room away/fallback temperatures
+- Configure occupancy entity and door/window actions
 
-### 8.3 Room Operations
-- **Create room**
-- **Edit room** (name, occupancy entity, door/window actions)
-- **Delete room**
+### 8.3 Person Operations
+- Add person (name + HA entity)
+- Edit, delete person
+- Assign to rooms
 
 ### 8.4 System Operations
-- **Edit default temps** (home/away/vacation/night)
-- **Toggle vacation mode** (system-level override)
-- **Export schedule** (all profiles, all rooms, as JSON)
-- **Import schedule** (restore from JSON)
-- **Set active profile per room** (bulk operation)
+- Switch house mode
+- Toggle vacation mode
+- Edit global temperatures
+- Export/import schedules (JSON)
 
 ---
 
@@ -500,169 +317,121 @@ All create/update/delete operations happen via dashboard (not Node-RED).
 {
   "id": "living_room",
   "name": "Living Room",
-  "occupancy_entity": "binary_sensor.living_room_motion",
+  "persons": ["person_david"],
   "door_window_actions": {
-    "doors": {
-      "action": "drop_by" | "turn_off",
-      "value": 3 (if drop_by)
-    },
-    "windows": {
-      "action": "drop_by" | "turn_off",
-      "value": 2 (if drop_by)
-    }
+    "doors": { "action": "drop_by", "value": 3 },
+    "windows": { "action": "turn_off" }
   }
 }
 ```
 
-### 9.2 Entity Discovery
-**Door entities:** Scan HA for `binary_sensor.*_door*`
-**Window entities:** Scan HA for `binary_sensor.*_window*`
-**Occupancy entity:** User specifies (not auto-discovered, to avoid false positives)
+### 9.2 Door/Window Actions
+- `turn_off`: heating off while open
+- `drop_by: X`: reduce temp by X°C while open
+- Applied after 5-minute delay
 
-### 9.3 Door/Window Delay Logic
-- Door/window must be open for 5+ minutes before action triggers
-- Action applies: reduce temp OR turn off heating
-- Revert when door/window closed
+### 9.3 Entity Discovery
+- Door/window entities: scan HA for `binary_sensor.*_door*` / `*_window*`
+- Occupancy entity: user specifies (not auto-discovered)
 
 ---
 
 ## 10. EDGE CASES & SPECIAL STATES
 
 ### 10.1 Vacation Mode
-- System-level toggle: `vacation_mode = true`
-- When true: all rooms use `default_temps.vacation` (5°C), regardless of profile or blocks
-- Overrides active blocks
-- Used for extended away (holidays, etc.)
+- `house_mode = vacation` → all rooms at `vacation_temp` (7°C default)
+- Overrides schedules, person presence, and away mode
 
-### 10.2 Always On / Always Off Profiles
-- **Always On:** single block per day, 00:00–23:59, desired temp (e.g., 21°C all day)
-- **Always Off:** no blocks, all days use `default_temps.away`
-- Cannot be deleted (house-level)
+### 10.2 No Person Data
+- If person entity missing/unavailable: treat as home
+- Log warning; do not change room behaviour
 
-### 10.3 No Occupancy Data
-If occupancy entity doesn't exist or goes stale:
-- System continues using active profile blocks
-- Node-RED logic handles (doesn't change profile)
-- Log warning
+### 10.3 Room with No Persons Assigned
+- Treated as always-occupied
+- Follows schedule; never enters away state based on presence
 
 ### 10.4 Multiple Doors/Windows
-- Auto-discovered as `door`, `door_1`, `door_2`, etc. (not numbered if only one)
-- All must close for 5 min before action reverts
-- If any door/window open, action stays active
+- All must close before action reverts (5-min timer resets if any re-open)
 
 ---
 
 ## 11. SYSTEM-LEVEL CONFIGURATION
 
-All stored in `config.json`:
-
-```json
-{
-  "version": 1,
-  "schema_version": 1,
-  "system_config": {
-    "min_block_duration_minutes": 30,
-    "temperature_min": 5,
-    "temperature_max": 35,
-    "temperature_heating_cooling_buffer": 2.0,
-    "door_window_delay_seconds": 300,
-    "default_temps": {
-      "home": 15,
-      "away": 10,
-      "vacation": 5,
-      "night": 16
-    },
-    "mqtt_retry_interval_seconds": 5,
-    "mqtt_retry_exponential_backoff": true,
-    "mqtt_retry_max_attempts": 10,
-    "logging_level": "info" | "debug"
-  }
-}
-```
+All stored in `config` block of the storage file.
 
 ### 11.1 Versioning
-- `version`: data format version (auto-incremented on schema changes)
-- `schema_version`: schema generation number (for migrations)
-- On upgrade: check version, apply migrations, save new version
+- `STORAGE_VERSION = 1` in code
+- Migrations applied on load if version mismatch
 
 ### 11.2 Editable via Dashboard
-- Default temps
-- Vacation mode
+- Global temperatures (away, fallback, vacation)
+- House mode
 - Min block duration
-- Retry settings
 - Logging level
 
-### 11.3 Not Editable (Hard-Coded or Restart-Required)
-- Min/max temps (config-file only)
-- Heating/cooling buffer (config-file only)
+### 11.3 Code-Only (Restart Required)
+- Min/max temperature bounds
+- Heating/cooling buffer
 
 ---
 
 ## 12. VALIDATION RULES
 
-All enforced on save:
+Enforced on every block save:
 
-1. **Block duration:** end - start >= 30 minutes
-2. **Block times:** 00:00–23:59, HH:MM format
-3. **Block temp:** within global min/max
-4. **No overlaps:** in target day
-5. **Start < end:** always
-6. **Profile exists:** on set_profile
-7. **Room exists:** on any room-based operation
-8. **Days of week:** only monday–sunday
+1. `end - start >= 30 minutes`
+2. Times in `00:00–23:59` HH:MM format
+3. Temperature within `temperature_min` / `temperature_max`
+4. No overlaps in target day (new block wins; existing trimmed/deleted with confirmation)
+5. `start < end`
+6. Room exists
+7. Day is monday–sunday
 
 ---
 
 ## 13. NODE-RED INTEGRATION
 
-### 13.1 Input to Node-RED
-Scheduler outputs:
-- `environmental_scheduler.get_active_block(room)` → current block object
-- `environmental_scheduler.get_blocks(room, profile, day)` → full schedule
-- Events: `environmental_scheduler.block_changed`, `environmental_scheduler.profile_changed`, `environmental_scheduler.active_block_changed`
+### 13.1 Scheduler → Node-RED
+- `environmental_scheduler.get_active_block(room)` → target temp + reason
+- `environmental_scheduler.get_blocks(room, day)` → full or filtered schedule
+- Events: `house_mode_changed`, `block_changed`, `active_block_changed`
 
-### 13.2 Output from Node-RED
-Node-RED can:
-- Call `environmental_scheduler.set_profile(room, profile)` to change active profile
-- Read occupancy, door/window, user tracking entities
-- Apply logic: occupancy + doors + profile + blocks → final setpoint
+### 13.2 Node-RED → Scheduler
+- `environmental_scheduler.set_house_mode(mode)`
+- `environmental_scheduler.set_vacation_mode(enabled)`
 
 ### 13.3 Scheduler Does NOT
-- Know about occupancy (beyond storing entity name)
-- Know about heating/cooling logic
-- Know about TRV demand
-- Know about AC cooling
-- Know about cheap-rate logic
-- Control any entities directly
+- Know about heating/cooling decisions
+- Control TRV or AC entities directly
+- Know about cheap-rate electricity logic
+- Own occupancy logic beyond reading HA person state
 
-**Node-RED owns all that logic.**
+**Node-RED owns all heating/cooling logic.**
 
 ---
 
-## 14. FUTURE-PROOFING
+## 14. FUTURE FEATURES
 
-This spec supports (with schema additions):
-
+Schema is forward-compatible with:
+- Guest bedroom override schedules (per-visit, per-person)
 - Cooling schedules (separate from heating)
-- Humidity schedules
-- Fan schedules
-- Multi-zone HVAC
-- Per-season profiles
-- Holiday mode (separate from vacation)
-- User preference profiles (ashton vs david)
+- Humidity scheduling
+- Per-season schedule variations
+- Holiday mode (distinct from vacation)
+- Door/window sensor automation
 
-**MVP does not include these. Schema is forward-compatible.**
+**Not in current scope.**
 
 ---
 
 ## 15. SUMMARY: CORE RESPONSIBILITIES
 
 | Component | Responsible For |
-|-----------|---|
-| **Scheduler** | Block storage, profile assignment, active block lookup, time logic, defaults |
-| **Dashboard** | Create/edit/delete blocks, profiles, rooms; clone; export/import |
-| **Node-RED** | Occupancy logic, door/window logic, heating/cooling logic, setpoint decisions |
-| **HA** | Entity storage, person tracking, door/window sensors, MQTT broker |
+|---|---|
+| **Scheduler** | Block storage, room schedules, person presence lookup, house mode, active temp resolution |
+| **Dashboard** | Create/edit/delete blocks, rooms, persons; mode switching; export/import |
+| **Node-RED** | Heating/cooling logic, TRV control, setpoint decisions, cheap-rate logic |
+| **HA** | Person tracking, door/window sensors, MQTT broker, entity state |
 
 **Scheduler is dumb. Node-RED is smart.**
 

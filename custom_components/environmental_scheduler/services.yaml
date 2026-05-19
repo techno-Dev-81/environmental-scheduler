@@ -1,6 +1,8 @@
 get_active_block:
   name: Get Active Block
-  description: Returns the currently active temperature block for a room, or the fallback temperature if no block is active.
+  description: >
+    Returns the current target temperature and active block for a room,
+    taking into account house mode (vacation/away) and person presence.
   fields:
     room:
       name: Room
@@ -12,7 +14,7 @@ get_active_block:
 
 get_blocks:
   name: Get Blocks
-  description: Returns all blocks for a room, optionally filtered by profile and/or day.
+  description: Returns all scheduled blocks for a room, optionally filtered by day.
   fields:
     room:
       name: Room
@@ -21,16 +23,9 @@ get_blocks:
       example: living_room
       selector:
         text:
-    profile:
-      name: Profile
-      description: Filter by profile name (e.g. home, away, night)
-      required: false
-      example: home
-      selector:
-        text:
     day:
       name: Day
-      description: Filter by day of week
+      description: Filter by day of week (returns full week if omitted)
       required: false
       example: monday
       selector:
@@ -44,32 +39,34 @@ get_blocks:
             - saturday
             - sunday
 
-set_profile:
-  name: Set Profile
-  description: Sets the active profile for a room. Fires a profile_changed event.
+set_house_mode:
+  name: Set House Mode
+  description: >
+    Sets the house-wide mode. 'normal' follows room schedules and person presence.
+    'away' applies away temperatures to all rooms. 'vacation' applies frost
+    protection temperature to all rooms regardless of schedules.
   fields:
-    room:
-      name: Room
-      description: Room ID (e.g. living_room)
-      required: true
-      example: living_room
-      selector:
-        text:
-    profile:
-      name: Profile
-      description: Profile name to activate (e.g. home, away, night, always_on, always_off)
+    mode:
+      name: Mode
+      description: House mode to activate
       required: true
       example: away
       selector:
-        text:
+        select:
+          options:
+            - normal
+            - away
+            - vacation
 
 set_vacation_mode:
   name: Set Vacation Mode
-  description: Enables or disables vacation mode. When enabled, all rooms use the vacation fallback temperature regardless of schedule.
+  description: >
+    Convenience shortcut. Enabling sets house mode to 'vacation' (frost protection).
+    Disabling sets house mode back to 'normal'.
   fields:
     enabled:
       name: Enabled
-      description: true to enable vacation mode, false to disable
+      description: true to enable vacation mode, false to return to normal
       required: true
       example: true
       selector:

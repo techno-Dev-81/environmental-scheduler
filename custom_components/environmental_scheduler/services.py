@@ -8,19 +8,19 @@ from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, Supp
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN, HOUSE_PROFILES
+from .const import DOMAIN, HOUSE_MODES
 from .storage import SchedulerStore
 
 _LOGGER = logging.getLogger(__name__)
 
 ATTR_ROOM = "room"
-ATTR_PROFILE = "profile"
 ATTR_DAY = "day"
+ATTR_MODE = "mode"
 ATTR_ENABLED = "enabled"
 
 SERVICE_GET_ACTIVE_BLOCK = "get_active_block"
 SERVICE_GET_BLOCKS = "get_blocks"
-SERVICE_SET_PROFILE = "set_profile"
+SERVICE_SET_HOUSE_MODE = "set_house_mode"
 SERVICE_SET_VACATION_MODE = "set_vacation_mode"
 
 SCHEMA_GET_ACTIVE_BLOCK = vol.Schema({
@@ -29,16 +29,14 @@ SCHEMA_GET_ACTIVE_BLOCK = vol.Schema({
 
 SCHEMA_GET_BLOCKS = vol.Schema({
     vol.Required(ATTR_ROOM): cv.string,
-    vol.Optional(ATTR_PROFILE): cv.string,
     vol.Optional(ATTR_DAY): vol.In([
         "monday", "tuesday", "wednesday", "thursday",
         "friday", "saturday", "sunday",
     ]),
 })
 
-SCHEMA_SET_PROFILE = vol.Schema({
-    vol.Required(ATTR_ROOM): cv.string,
-    vol.Required(ATTR_PROFILE): cv.string,
+SCHEMA_SET_HOUSE_MODE = vol.Schema({
+    vol.Required(ATTR_MODE): vol.In(HOUSE_MODES),
 })
 
 SCHEMA_SET_VACATION_MODE = vol.Schema({
@@ -59,104 +57,73 @@ def register_services(hass: HomeAssistant) -> None:
         store = _get_store(hass)
         room_id = call.data[ATTR_ROOM]
         try:
-            block = store.get_active_block(room_id, datetime.now())
+            result = store.get_active_block(room_id, datetime.now())
         except ValueError as e:
             raise ServiceValidationError(str(e)) from e
-
-        if block is None:
-            config = store.get_config()
-            active_profile = config.active_profile_by_room.get(room_id, "home")
-            fallback_temp = config.default_temps.get("vacation" if config.vacation_mode else active_profile)
-            return {
-                "active_block": None,
-                "fallback_temperature": fallback_temp,
-                "vacation_mode": config.vacation_mode,
-            }
-
-        return {
-            "active_block": {
-                **block.to_dict(),
-                "profile": store.get_config().active_profile_by_room.get(room_id, "home"),
-            },
-            "fallback_temperature": None,
-            "vacation_mode": store.get_config().vacation_mode,
-        }
+        return result
 
     async def handle_get_blocks(call: ServiceCall) -> ServiceResponse:
         store = _get_store(hass)
         room_id = call.data[ATTR_ROOM]
-        profile_name = call.data.get(ATTR_PROFILE)
         day = call.data.get(ATTR_DAY)
 
         if store.get_room(room_id) is None:
             raise ServiceValidationError(f"Room '{room_id}' not found")
 
-        if profile_name:
-            try:
-                blocks = store.get_blocks(room_id, profile_name, day)
-            except ValueError as e:
-                raise ServiceValidationError(str(e)) from e
+        try:
             if day:
-                return {"room": room_id, "profile": profile_name, "day": day, "blocks": [b.to_dict() for b in blocks]}
-            profile = store.get_profile(room_id, profile_name)
+                blocks = store.get_blocks(room_id, day)
+                return {"room": room_id, "day": day, "blocks": [b.to_dict() for b in blocks]}
+
+            room = store.get_room(room_id)
             return {
                 "room": room_id,
-                "profile": profile_name,
                 "schedule": {
-                    d: [b.to_dict() for b in profile.get_day(d)]
+                    d: [b.to_dict() for b in room.get_day(d)]
                     for d in ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
                 },
             }
+        except ValueError as e:
+            raise ServiceValidationError(str(e)) from e
 
-        # All profiles for the room
-        profiles = store.get_profiles(room_id)
-        result = {}
-        for p in profiles:
-            schedule = {d: [b.to_dict() for b in p.get_day(d)] for d in p.weekly_schedule}
-            result[p.name] = schedule if not day else p.get_day(day)
-        return {"room": room_id, "profiles": result}
-
-    async def handle_set_profile(call: ServiceCall) -> ServiceResponse:
+    async def handle_set_house_mode(call: ServiceCall) -> ServiceResponse:
         store = _get_store(hass)
-        room_id = call.data[ATTR_ROOM]
-        profile_name = call.data[ATTR_PROFILE]
+        mode = call.data[ATTR_MODE]
+        previous = store.get_config().house_mode
 
-        previous = store.get_config().active_profile_by_room.get(room_id, "home")
         try:
-            store.set_active_profile(room_id, profile_name)
+            store.set_house_mode(mode)
         except ValueError as e:
             raise ServiceValidationError(str(e)) from e
 
         await store.async_save()
 
-        block = store.get_active_block(room_id, datetime.now())
-        hass.bus.async_fire(f"{DOMAIN}.profile_changed", {
-            "room": room_id,
-            "previous_profile": previous,
-            "active_profile": profile_name,
-            "active_block": block.to_dict() if block else None,
+        hass.bus.async_fire(f"{DOMAIN}.house_mode_changed", {
+            "previous_mode": previous,
+            "active_mode": mode,
             "triggered_by": "service",
         })
 
         return {
             "success": True,
-            "previous_profile": previous,
-            "active_profile": profile_name,
-            "active_block": block.to_dict() if block else None,
+            "previous_mode": previous,
+            "active_mode": mode,
         }
 
     async def handle_set_vacation_mode(call: ServiceCall) -> ServiceResponse:
         store = _get_store(hass)
         enabled = call.data[ATTR_ENABLED]
-        config = store.get_config()
-        config.vacation_mode = enabled
-        store.update_config(config)
+        mode = "vacation" if enabled else "normal"
+        previous = store.get_config().house_mode
+
+        store.set_house_mode(mode)
         await store.async_save()
 
         return {
             "success": True,
-            "vacation_mode": enabled,
-            "vacation_temperature": config.default_temps.get("vacation"),
+            "previous_mode": previous,
+            "active_mode": mode,
+            "vacation_temperature": store.get_config().vacation_temp,
         }
 
     hass.services.async_register(
@@ -172,9 +139,9 @@ def register_services(hass: HomeAssistant) -> None:
         supports_response=SupportsResponse.ONLY,
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_SET_PROFILE,
-        handle_set_profile,
-        schema=SCHEMA_SET_PROFILE,
+        DOMAIN, SERVICE_SET_HOUSE_MODE,
+        handle_set_house_mode,
+        schema=SCHEMA_SET_HOUSE_MODE,
         supports_response=SupportsResponse.ONLY,
     )
     hass.services.async_register(
@@ -186,5 +153,10 @@ def register_services(hass: HomeAssistant) -> None:
 
 
 def unregister_services(hass: HomeAssistant) -> None:
-    for service in (SERVICE_GET_ACTIVE_BLOCK, SERVICE_GET_BLOCKS, SERVICE_SET_PROFILE, SERVICE_SET_VACATION_MODE):
+    for service in (
+        SERVICE_GET_ACTIVE_BLOCK,
+        SERVICE_GET_BLOCKS,
+        SERVICE_SET_HOUSE_MODE,
+        SERVICE_SET_VACATION_MODE,
+    ):
         hass.services.async_remove(DOMAIN, service)
