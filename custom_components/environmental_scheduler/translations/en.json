@@ -63,7 +63,6 @@
           "climate_entities": "TRV / climate entities (one or more for heating rooms)",
           "hot_water_entity": "Hot water entity (switch or water_heater — sets zone to hot water)",
           "temperature_sensor": "Temperature sensor (optional — for monitoring or rooms without TRV reporting)",
-          "preheat_offset_minutes": "Pre-heat offset — minutes before block start to begin heating",
           "persons": "Persons who activate this room",
           "persons_logic": "Presence logic",
           "delete": "Delete this room"

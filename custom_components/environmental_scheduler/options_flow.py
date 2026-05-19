@@ -222,24 +222,26 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
                 await store.async_save()
                 return await self.async_step_init()
 
-            room.climate_entities       = user_input.get("climate_entities") or []
-            room.hot_water_entity       = user_input.get("hot_water_entity") or None
-            room.temperature_sensor     = user_input.get("temperature_sensor") or None
-            room.preheat_offset_minutes = int(user_input.get("preheat_offset_minutes") or 0)
-            room.persons                = user_input.get("persons") or []
+            room.climate_entities   = user_input.get("climate_entities") or []
+            room.hot_water_entity   = user_input.get("hot_water_entity") or None
+            room.temperature_sensor = user_input.get("temperature_sensor") or None
+            room.persons            = user_input.get("persons") or []
             room.persons_logic          = user_input.get("persons_logic", "and")
             store.update_room(room)
             await store.async_save()
             return await self.async_step_init()
 
-        schema_dict = {
+        schema_dict: dict = {
             vol.Optional("climate_entities", default=room.climate_entities): _CLIMATE_ENTITIES_SELECTOR,
-            vol.Optional("hot_water_entity", default=room.hot_water_entity or ""): _SWITCH_ENTITY_SELECTOR,
-            vol.Optional("temperature_sensor", default=room.temperature_sensor or ""): _TEMP_SENSOR_SELECTOR,
-            vol.Optional("preheat_offset_minutes", default=room.preheat_offset_minutes): selector.selector({
-                "number": {"min": 0, "max": 120, "step": 5, "unit_of_measurement": "min", "mode": "slider"},
-            }),
         }
+        if room.hot_water_entity:
+            schema_dict[vol.Optional("hot_water_entity", default=room.hot_water_entity)] = _SWITCH_ENTITY_SELECTOR
+        else:
+            schema_dict[vol.Optional("hot_water_entity")] = _SWITCH_ENTITY_SELECTOR
+        if room.temperature_sensor:
+            schema_dict[vol.Optional("temperature_sensor", default=room.temperature_sensor)] = _TEMP_SENSOR_SELECTOR
+        else:
+            schema_dict[vol.Optional("temperature_sensor")] = _TEMP_SENSOR_SELECTOR
 
         if person_options:
             schema_dict[vol.Optional("persons", default=room.persons)] = selector.selector({
