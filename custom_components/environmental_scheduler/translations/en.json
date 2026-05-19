@@ -15,9 +15,11 @@
       "init": {
         "title": "Environmental Scheduler",
         "menu_options": {
-          "global_settings": "Global temperature settings",
+          "global_settings": "Global settings",
           "manage_persons": "Manage persons",
-          "room_settings": "Room settings"
+          "room_settings": "Edit a room",
+          "add_room": "Add a room",
+          "done": "Done"
         }
       },
       "global_settings": {
@@ -38,20 +40,19 @@
       "add_person": {
         "title": "Add Person",
         "data": {
-          "name": "Display name",
           "ha_entity": "Home Assistant person entity"
-        }
+        },
+        "description": "The display name will be taken from the entity's friendly name in Home Assistant."
       },
       "edit_person": {
-        "title": "Edit Person",
+        "title": "Edit Person — {person_name}",
         "data": {
-          "name": "Display name",
           "ha_entity": "Home Assistant person entity",
           "delete": "Delete this person"
         }
       },
       "room_settings": {
-        "title": "Room Settings",
+        "title": "Edit a Room",
         "data": {
           "room": "Select a room to configure"
         }
@@ -60,12 +61,19 @@
         "title": "Edit Room — {room_name}",
         "data": {
           "entity_type": "Zone type",
-          "climate_entity": "Climate / TRV entity (heating zones)",
-          "hot_water_entity": "Hot water entity (switch or water_heater)",
-          "preheat_offset_minutes": "Pre-heat offset (minutes before block start)",
-          "away_temp": "Away temperature (overrides global)",
-          "fallback_temp": "Fallback temperature (overrides global)",
-          "persons": "Persons who activate this room"
+          "climate_entity": "Climate / TRV entity (for heating zones)",
+          "hot_water_entity": "Hot water entity (for hot water zones)",
+          "preheat_offset_minutes": "Pre-heat offset — minutes before block start to begin heating",
+          "persons": "Persons who activate this room",
+          "persons_logic": "Presence logic",
+          "delete": "Delete this room"
+        }
+      },
+      "add_room": {
+        "title": "Add Room",
+        "data": {
+          "name": "Room name",
+          "entity_type": "Zone type"
         }
       }
     },

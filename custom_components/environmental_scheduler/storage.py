@@ -192,12 +192,13 @@ class SchedulerStore:
         # 3. Normal mode — check person presence
         if room.persons:
             person_map = {p.id: p for p in config.persons}
-            all_away = all(
-                self._person_is_away(person_map[pid])
-                for pid in room.persons
-                if pid in person_map
-            )
-            if all_away:
+            tracked = [person_map[pid] for pid in room.persons if pid in person_map]
+            away_states = [self._person_is_away(p) for p in tracked]
+            if room.persons_logic == "or":
+                persons_away = any(away_states)
+            else:
+                persons_away = bool(away_states) and all(away_states)
+            if persons_away:
                 away_temp = room.away_temp if room.away_temp is not None else config.global_away_temp
                 return {
                     "active_block": None,
