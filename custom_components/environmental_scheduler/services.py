@@ -31,6 +31,7 @@ SERVICE_COMMIT_BLOCK     = "commit_block"
 SERVICE_DELETE_BLOCK     = "delete_block"
 SERVICE_TOGGLE_BLOCK     = "toggle_block"
 SERVICE_COPY_DAY         = "copy_day"
+SERVICE_GET_HOUSE_STATUS = "get_house_status"
 
 SCHEMA_GET_ACTIVE_BLOCK = vol.Schema({
     vol.Required(ATTR_ROOM): cv.string,
@@ -381,6 +382,52 @@ def register_services(hass: HomeAssistant) -> None:
         supports_response=SupportsResponse.ONLY,
     )
 
+    async def handle_get_house_status(call: ServiceCall) -> ServiceResponse:
+        store   = _get_store(hass)
+        config  = store.get_config()
+        now     = datetime.now()
+        rooms   = store.get_rooms()
+
+        room_statuses = []
+        for room in rooms:
+            try:
+                status = store.get_active_block(room.id, now)
+            except ValueError:
+                status = {"active_block": None, "target_temperature": None, "reason": "error"}
+            room_statuses.append({
+                "id":   room.id,
+                "name": room.name,
+                "target_temperature": status["target_temperature"],
+                "reason": status["reason"],
+                "active_block": status["active_block"],
+                "persons": room.persons,
+            })
+
+        person_states = []
+        for person in config.persons:
+            state = hass.states.get(person.ha_entity)
+            person_states.append({
+                "id":        person.id,
+                "name":      person.name,
+                "ha_entity": person.ha_entity,
+                "state":     state.state if state else "unknown",
+            })
+
+        return {
+            "house_mode": config.house_mode,
+            "vacation_temp": config.vacation_temp,
+            "global_away_temp": config.global_away_temp,
+            "persons": person_states,
+            "rooms": room_statuses,
+        }
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_GET_HOUSE_STATUS,
+        handle_get_house_status,
+        schema=vol.Schema({}),
+        supports_response=SupportsResponse.ONLY,
+    )
+
 
 def unregister_services(hass: HomeAssistant) -> None:
     for service in (
@@ -394,5 +441,6 @@ def unregister_services(hass: HomeAssistant) -> None:
         SERVICE_DELETE_BLOCK,
         SERVICE_TOGGLE_BLOCK,
         SERVICE_COPY_DAY,
+        SERVICE_GET_HOUSE_STATUS,
     ):
         hass.services.async_remove(DOMAIN, service)
