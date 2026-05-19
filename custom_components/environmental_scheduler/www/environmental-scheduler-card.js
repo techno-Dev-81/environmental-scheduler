@@ -37,7 +37,7 @@ class EnvironmentalSchedulerCard extends HTMLElement {
     this._view         = 'week';
     this._refreshTimer = null;
     this._initialized  = false;
-    this._dialog       = null; // { mode:'add'|'edit', day, block?, start, end }
+    this._dialog       = null; // { mode:'add'|'edit'|'copy', day, ... }
   }
 
   setConfig(config) {
@@ -192,8 +192,56 @@ class EnvironmentalSchedulerCard extends HTMLElement {
   }
 
   _showError(msg) {
-    // Simple inline error — replace with a toast in future
     alert(msg);
+  }
+
+  // ------------------------------------------------------------------ copy day
+
+  _openCopyDialog(day) {
+    this._dialog = { mode: 'copy', day, targets: [] };
+    this._render();
+  }
+
+  _renderCopyDialog() {
+    const d      = this._dialog;
+    const days   = this._view === 'day' ? weekStartingToday() : weekStartingToday();
+    const srcLabel = DAY_LABELS[d.day];
+    const srcBlocks = this._schedule?.[d.day] ?? [];
+
+    const checkboxes = ALL_DAYS.filter(day => day !== d.day).map(day => {
+      const checked = d.targets.includes(day) ? 'checked' : '';
+      return `<label class="copy-day-opt">
+        <input type="checkbox" value="${day}" ${checked}> ${DAY_LABELS[day]}
+      </label>`;
+    }).join('');
+
+    return `
+      <div class="dlg-overlay">
+        <div class="dlg">
+          <div class="dlg-title">Copy ${srcLabel} → other days</div>
+          <div class="copy-hint">${srcBlocks.length} block${srcBlocks.length!==1?'s':''} will replace the target day's schedule.</div>
+          <div class="copy-days">${checkboxes}</div>
+          <div class="dlg-actions">
+            <button class="dlg-btn secondary" id="dlg-cancel">Cancel</button>
+            <button class="dlg-btn primary" id="dlg-copy-confirm">Copy</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  async _executeCopy() {
+    const d = this._dialog;
+    // Read checked state fresh from DOM before closing
+    this.shadowRoot.querySelectorAll('.copy-days input[type=checkbox]').forEach(cb => {
+      if (cb.checked && !d.targets.includes(cb.value)) d.targets.push(cb.value);
+      if (!cb.checked) d.targets = d.targets.filter(t => t !== cb.value);
+    });
+    if (d.targets.length === 0) { this._closeDialog(); return; }
+    try {
+      await this._call('copy_day', { room: this._selectedRoom, source_day: d.day, target_days: d.targets });
+    } catch(e) { this._showError('Copy failed: ' + (e.message||e)); return; }
+    this._closeDialog();
+    await this._doRefresh();
   }
 
   // ------------------------------------------------------------------ render
@@ -242,6 +290,7 @@ class EnvironmentalSchedulerCard extends HTMLElement {
         <div class="day-row${isToday?' today':''}">
           <div class="day-label">${DAY_LABELS[day]}</div>
           <div class="day-track${tall}" data-day="${day}">${bars}${nowLine}</div>
+          <button class="copy-btn" data-day="${day}" title="Copy ${DAY_LABELS[day]} to other days">⧉</button>
         </div>`;
     }).join('');
 
@@ -255,7 +304,9 @@ class EnvironmentalSchedulerCard extends HTMLElement {
       ? `<span class="s-temp">${targetT}°C</span><span class="s-reason">${reason}</span>`
       : `<span class="s-reason">Loading…</span>`;
 
-    const dialogHtml = this._dialog ? this._renderDialog() : '';
+    const dialogHtml = this._dialog
+      ? (this._dialog.mode === 'copy' ? this._renderCopyDialog() : this._renderDialog())
+      : '';
 
     this.shadowRoot.innerHTML = `
       ${this._css(meta.color)}
@@ -355,6 +406,11 @@ class EnvironmentalSchedulerCard extends HTMLElement {
       });
     });
 
+    // Copy buttons
+    root.querySelectorAll('.copy-btn').forEach(btn => {
+      btn.addEventListener('click', e => { e.stopPropagation(); this._openCopyDialog(btn.dataset.day); });
+    });
+
     // Dialog controls
     if (this._dialog) {
       root.querySelector('#dlg-cancel')?.addEventListener('click', () => this._closeDialog());
@@ -377,6 +433,7 @@ class EnvironmentalSchedulerCard extends HTMLElement {
         this._dialog.temp = Math.max(5, Math.round((this._dialog.temp - 0.5) * 2) / 2);
         this._render();
       });
+      root.querySelector('#dlg-copy-confirm')?.addEventListener('click', () => this._executeCopy());
       root.querySelector('.dlg-overlay')?.addEventListener('click', e => {
         if (e.target === e.currentTarget) this._closeDialog();
       });
@@ -422,6 +479,15 @@ class EnvironmentalSchedulerCard extends HTMLElement {
       .time-axis{position:relative;height:16px;margin-left:30px}
       .tick{position:absolute;font-size:.6rem;color:var(--disabled-text-color,#666)}
       .no-data{text-align:center;padding:28px 0;color:var(--secondary-text-color);font-size:.85rem}
+      .copy-btn{border:none;background:transparent;color:var(--secondary-text-color);cursor:pointer;font-size:.85rem;padding:2px 4px;opacity:0;transition:opacity .15s;flex-shrink:0}
+      .day-row:hover .copy-btn{opacity:1}
+      .copy-btn:hover{color:var(--primary-color,#03a9f4)}
+
+      /* Copy dialog extras */
+      .copy-hint{font-size:.78rem;color:var(--secondary-text-color);margin-bottom:12px}
+      .copy-days{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:4px}
+      .copy-day-opt{display:flex;align-items:center;gap:6px;font-size:.85rem;color:var(--primary-text-color);cursor:pointer}
+      .copy-day-opt input{accent-color:var(--primary-color,#03a9f4);cursor:pointer}
 
       /* Dialog */
       .dlg-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center}
