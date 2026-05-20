@@ -110,11 +110,13 @@ class EnvironmentalSchedulerOverviewCard extends HTMLElement {
     } catch(e) {
       console.error('[EnvScheduler Overview] refresh failed', e);
     }
-    this._render();
+    // Don't re-render while the config panel is open — it would reset the panel
+    if (!this._configRoomId) this._render();
   }
 
   _renderIfReady() {
-    if (this._status) this._render();
+    // Don't re-render while the config panel is open — it would reset the panel
+    if (this._status && !this._configRoomId) this._render();
   }
 
   async _setMode(mode) {
