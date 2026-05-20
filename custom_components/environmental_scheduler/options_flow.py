@@ -19,6 +19,7 @@ _PERSON_ENTITY_SELECTOR = selector.selector({"entity": {"domain": "person"}})
 _CLIMATE_ENTITIES_SELECTOR  = selector.selector({"entity": {"domain": "climate", "multiple": True}})
 _HOT_WATER_ENTITY_SELECTOR  = selector.selector({"entity": {"domain": ["switch", "water_heater", "input_boolean"]}})
 _TEMP_SENSORS_SELECTOR      = selector.selector({"entity": {"domain": "sensor", "device_class": "temperature", "multiple": True}})
+_BINARY_SENSORS_SELECTOR    = selector.selector({"entity": {"domain": "binary_sensor", "multiple": True}})
 _AREA_SELECTOR              = selector.selector({"area": {}})
 _TEXT_SELECTOR  = selector.selector({"text": {}})
 _BOOL_SELECTOR  = selector.selector({"boolean": {}})
@@ -223,28 +224,45 @@ class EnvironmentalSchedulerOptionsFlow(config_entries.OptionsFlow):
                 await store.async_save()
                 return await self.async_step_init()
 
-            room.name               = user_input.get("name", room.name).strip() or room.name
-            room.area_id            = user_input.get("area_id") or None
-            room.climate_entities   = user_input.get("climate_entities") or []
-            room.hot_water_entity   = user_input.get("hot_water_entity") or None
+            room.name                = user_input.get("name", room.name).strip() or room.name
+            room.area_id             = user_input.get("area_id") or None
+            room.climate_entities    = user_input.get("climate_entities") or []
+            room.hot_water_entity    = user_input.get("hot_water_entity") or None
             room.temperature_sensors = user_input.get("temperature_sensors") or []
-            room.persons            = user_input.get("persons") or []
+            room.persons             = user_input.get("persons") or []
+
+            # Store door/window entities inside door_window_actions
+            dwa = room.door_window_actions or {}
+            dwa.setdefault("doors",   {})["entities"] = user_input.get("door_entities") or []
+            dwa.setdefault("windows", {})["entities"] = user_input.get("window_entities") or []
+            room.door_window_actions = dwa
 
             store.update_room(room)
             await store.async_save()
             return await self.async_step_init()
 
+        dwa         = room.door_window_actions or {}
+        door_ents   = dwa.get("doors",   {}).get("entities", [])
+        window_ents = dwa.get("windows", {}).get("entities", [])
+
         schema_dict: dict = {
             vol.Required("name", default=room.name): _TEXT_SELECTOR,
-            vol.Optional("area_id", default=room.area_id or ""): _AREA_SELECTOR,
-            vol.Optional("climate_entities",  default=room.climate_entities):   _CLIMATE_ENTITIES_SELECTOR,
-            vol.Optional("temperature_sensors", default=room.temperature_sensors): _TEMP_SENSORS_SELECTOR,
         }
+        if room.area_id:
+            schema_dict[vol.Optional("area_id", default=room.area_id)] = _AREA_SELECTOR
+        else:
+            schema_dict[vol.Optional("area_id")] = _AREA_SELECTOR
+
+        schema_dict[vol.Optional("climate_entities",    default=room.climate_entities)]    = _CLIMATE_ENTITIES_SELECTOR
+        schema_dict[vol.Optional("temperature_sensors", default=room.temperature_sensors)] = _TEMP_SENSORS_SELECTOR
+
         if room.hot_water_entity:
             schema_dict[vol.Optional("hot_water_entity", default=room.hot_water_entity)] = _HOT_WATER_ENTITY_SELECTOR
         else:
             schema_dict[vol.Optional("hot_water_entity")] = _HOT_WATER_ENTITY_SELECTOR
 
+        schema_dict[vol.Optional("door_entities",   default=door_ents)]   = _BINARY_SENSORS_SELECTOR
+        schema_dict[vol.Optional("window_entities", default=window_ents)] = _BINARY_SENSORS_SELECTOR
 
         if person_options:
             schema_dict[vol.Optional("persons", default=room.persons)] = selector.selector({
