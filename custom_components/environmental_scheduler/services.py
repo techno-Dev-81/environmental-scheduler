@@ -132,12 +132,7 @@ def register_services(hass: HomeAssistant) -> None:
     async def handle_get_rooms(call: ServiceCall) -> ServiceResponse:
         store = _get_store(hass)
         rooms = store.get_rooms()
-        return {
-            "rooms": [
-                {"id": r.id, "name": r.name, "persons": r.persons}
-                for r in rooms
-            ]
-        }
+        return {"rooms": [r.to_dict() for r in rooms]}
 
     async def handle_get_active_block(call: ServiceCall) -> ServiceResponse:
         store = _get_store(hass)
