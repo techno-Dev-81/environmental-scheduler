@@ -65,6 +65,8 @@
           "climate_entities": "TRV / climate entities (one or more)",
           "hot_water_entity": "Hot water entity (switch or water_heater)",
           "temperature_sensors": "Temperature sensors (optional, one or more)",
+          "door_entities": "Door sensors",
+          "window_entities": "Window sensors",
           "persons": "Persons who activate this room (heats if any person is home)",
           "delete": "Delete this room"
         }
