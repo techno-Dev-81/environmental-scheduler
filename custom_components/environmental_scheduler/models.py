@@ -102,6 +102,8 @@ class Room:
     climate_entities: list[str] = field(default_factory=list)
     hot_water_entity: str | None = None
     temperature_sensors: list[str] = field(default_factory=list)
+    door_entities: list[str] = field(default_factory=list)
+    window_entities: list[str] = field(default_factory=list)
     preheat_offset_minutes: int = 0
     weekly_schedule: dict[str, list[Block]] = field(
         default_factory=lambda: {day: [] for day in DAYS_OF_WEEK}
@@ -138,6 +140,8 @@ class Room:
             "climate_entities": self.climate_entities,
             "hot_water_entity": self.hot_water_entity,
             "temperature_sensors": self.temperature_sensors,
+            "door_entities": self.door_entities,
+            "window_entities": self.window_entities,
             "preheat_offset_minutes": self.preheat_offset_minutes,
             "weekly_schedule": {
                 day: [b.to_dict() for b in blocks]
@@ -165,6 +169,8 @@ class Room:
             climate_entities=climate_entities,
             hot_water_entity=data.get("hot_water_entity"),
             temperature_sensors=temperature_sensors,
+            door_entities=data.get("door_entities", []),
+            window_entities=data.get("window_entities", []),
             preheat_offset_minutes=int(data.get("preheat_offset_minutes", 0)),
             weekly_schedule={
                 day: [Block.from_dict(b) for b in blocks]

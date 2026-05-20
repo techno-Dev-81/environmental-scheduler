@@ -26,6 +26,9 @@ SERVICE_GET_ROOMS            = "get_rooms"
 SERVICE_GET_ACTIVE_BLOCK     = "get_active_block"
 SERVICE_GET_BLOCKS           = "get_blocks"
 SERVICE_GET_UPCOMING_BLOCKS  = "get_upcoming_blocks"
+SERVICE_UPDATE_ROOM          = "update_room"
+SERVICE_ADD_ROOM             = "add_room"
+SERVICE_DELETE_ROOM          = "delete_room"
 SERVICE_SET_HOUSE_MODE       = "set_house_mode"
 SERVICE_SET_VACATION_MODE    = "set_vacation_mode"
 SERVICE_COMMIT_BLOCK         = "commit_block"
@@ -84,6 +87,26 @@ SCHEMA_COPY_DAY = vol.Schema({
     vol.Required(ATTR_ROOM):        cv.string,
     vol.Required("source_day"):     vol.In(DAYS_OF_WEEK),
     vol.Required("target_days"):    [vol.In(DAYS_OF_WEEK)],
+})
+
+SCHEMA_ADD_ROOM = vol.Schema({
+    vol.Required("name"): cv.string,
+})
+
+SCHEMA_DELETE_ROOM = vol.Schema({
+    vol.Required(ATTR_ROOM): cv.string,
+})
+
+SCHEMA_UPDATE_ROOM = vol.Schema({
+    vol.Required(ATTR_ROOM):                       cv.string,
+    vol.Optional("name"):                          cv.string,
+    vol.Optional("area_id"):                       vol.Any(cv.string, None),
+    vol.Optional("climate_entities", default=[]):  [cv.string],
+    vol.Optional("hot_water_entity"):              vol.Any(cv.string, None),
+    vol.Optional("temperature_sensors", default=[]): [cv.string],
+    vol.Optional("door_entities", default=[]):     [cv.string],
+    vol.Optional("window_entities", default=[]):   [cv.string],
+    vol.Optional("persons", default=[]):           [cv.string],
 })
 
 SCHEMA_GET_UPCOMING_BLOCKS = vol.Schema({
@@ -440,6 +463,78 @@ def register_services(hass: HomeAssistant) -> None:
         supports_response=SupportsResponse.ONLY,
     )
 
+    async def handle_add_room(call: ServiceCall) -> ServiceResponse:
+        import re
+        store = _get_store(hass)
+        name = call.data["name"].strip()
+        if not name:
+            raise ServiceValidationError("Room name cannot be empty")
+        room_id = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+        existing = {r.id for r in store.get_rooms()}
+        base, n = room_id, 1
+        while room_id in existing:
+            room_id = f"{base}_{n}"; n += 1
+        from .models import Room
+        room = Room(id=room_id, name=name)
+        store.add_room(room)
+        await store.async_save()
+        hass.bus.async_fire(f"{DOMAIN}.room_changed", {"room": room_id, "action": "created"})
+        return {"status": "ok", "room": room.to_dict()}
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_ADD_ROOM,
+        handle_add_room,
+        schema=SCHEMA_ADD_ROOM,
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    async def handle_delete_room(call: ServiceCall) -> ServiceResponse:
+        store = _get_store(hass)
+        room_id = call.data[ATTR_ROOM]
+        try:
+            store.delete_room(room_id)
+        except ValueError as e:
+            raise ServiceValidationError(str(e)) from e
+        await store.async_save()
+        hass.bus.async_fire(f"{DOMAIN}.room_changed", {"room": room_id, "action": "deleted"})
+        return {"status": "ok"}
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_DELETE_ROOM,
+        handle_delete_room,
+        schema=SCHEMA_DELETE_ROOM,
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    async def handle_update_room(call: ServiceCall) -> ServiceResponse:
+        store = _get_store(hass)
+        room_id = call.data[ATTR_ROOM]
+        room = store.get_room(room_id)
+        if not room:
+            raise ServiceValidationError(f"Room '{room_id}' not found")
+        if "name" in call.data:
+            room.name = call.data["name"].strip() or room.name
+        if "area_id" in call.data:
+            room.area_id = call.data["area_id"] or None
+        room.climate_entities    = call.data.get("climate_entities", room.climate_entities)
+        if "hot_water_entity" in call.data:
+            room.hot_water_entity = call.data["hot_water_entity"] or None
+        room.temperature_sensors = call.data.get("temperature_sensors", room.temperature_sensors)
+        room.door_entities       = call.data.get("door_entities", room.door_entities)
+        room.window_entities     = call.data.get("window_entities", room.window_entities)
+        room.persons             = call.data.get("persons", room.persons)
+        store.update_room(room)
+        await store.async_save()
+        hass.bus.async_fire(f"{DOMAIN}.room_changed", {"room": room.id, "action": "updated"})
+        return {"status": "ok", "room": room.to_dict()}
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_UPDATE_ROOM,
+        handle_update_room,
+        schema=SCHEMA_UPDATE_ROOM,
+        supports_response=SupportsResponse.ONLY,
+    )
+
     async def handle_get_upcoming_blocks(call: ServiceCall) -> ServiceResponse:
         store = _get_store(hass)
         room_id = call.data[ATTR_ROOM]
@@ -499,5 +594,8 @@ def unregister_services(hass: HomeAssistant) -> None:
         SERVICE_COPY_DAY,
         SERVICE_GET_HOUSE_STATUS,
         SERVICE_SET_PREHEAT_OFFSET,
+        SERVICE_UPDATE_ROOM,
+        SERVICE_ADD_ROOM,
+        SERVICE_DELETE_ROOM,
     ):
         hass.services.async_remove(DOMAIN, service)
